@@ -1,0 +1,13 @@
+name = "UncertainIntervals"
+uuid = "1853b6f7-4c2b-4ead-9554-d01d2aac1500"
+version = "0.1.0"
+authors = ["Patrick Häcker <pat_h@web.de>"]
+
+[deps]
+Infinities = "e1ba4f0e-776d-440f-acd9-e1d2e9742647"
+
+[sources]
+Infinities = {rev = "master", url = "https://github.com/JuliaMath/Infinities.jl.git"}
+
+[compat]
+Infinities = "0.1.12"
