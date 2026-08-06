@@ -1,0 +1,26 @@
+"""
+    @∃ regular exceptional=nothing
+
+Ensure a `regular` value exists (being not `nothing`) and return it. Otherwise exit the enclosing function returning `exception`.
+
+`exception` is `nothing` by default, but it can be a subtype of Exception, too, or any other value.
+
+In some situations this is a cheap alternative to `throw`: The rest of the current function execution can rely on the value not being nothing while the caller of the current function optionally gets an indication about what went wrong.
+
+"""
+macro ∃(regular, exceptional=nothing)
+    :(temp = $(regular |> esc); isnothing(temp) ? (return $(exceptional |> esc)) : temp)
+end
+
+macro ∄(regular, exceptional=nothing)
+    :($(regular |> esc) |> isnothing ? nothing : (return $(exceptional |> esc)))
+end
+
+"[See also](https://en.wikipedia.org/wiki/Truth_value)"
+macro ⊤(condition, exceptional=nothing)
+    :($(condition |> esc) ? true : (return $(exceptional |> esc)))
+end
+
+macro ⊥(condition, exceptional=nothing)
+    :($(condition |> esc) ? (return $(exceptional |> esc)) : false)
+end

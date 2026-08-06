@@ -1,7 +1,8 @@
 module UncertainIntervals
 
-using Infinities
+using Infinities: NegativeInfinity, PositiveInfinity
 
-
+include("exceptional.jl")
+include("interval.jl")
 
 end
