@@ -8,7 +8,7 @@ using UseAll
     # Test basic interval construction
     @testset "Basic Interval Construction" begin
         # Test certain interval
-        interval = Interval(Closed, Closed, 1.0, 2.0)
+        interval = ClosedClosed(1.0, 2.0)
         @test interval.left == 1.0
         @test interval.right == 2.0
         @test interval isa Interval{Float64}

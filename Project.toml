@@ -13,8 +13,9 @@ Infinities = "e1ba4f0e-776d-440f-acd9-e1d2e9742647"
 Infinities = {rev = "master", url = "https://github.com/JuliaMath/Infinities.jl"}
 UseAll = {rev = "main", url = "https://github.com/PatrickHaecker/UseAll.jl"}
 
-[extras]
-UseAll = "edbe3dbe-4909-5f9e-bb65-679d27932c2a"
-
 [compat]
 Infinities = "0.1.12"
+UseAll = "0.1"
+
+[extras]
+UseAll = "edbe3dbe-4909-5f9e-bb65-679d27932c2a"
