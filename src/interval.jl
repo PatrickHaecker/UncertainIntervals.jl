@@ -15,8 +15,8 @@ isclosed(x::LeftOpenness) = x == LeftClosed()
 isopen(x::RightOpenness) = x == RightOpen()
 isclosed(x::RightOpenness) = x == RightClosed()
 
-Base.tryparse(::Type{LeftOpenness}, c::AbstractChar) = c == '(' ? LeftOpen() : c == '[' ? LeftClosed() : nothing
-Base.tryparse(::Type{RightOpenness}, c::AbstractChar) = c == ')' ? RightOpen() : c == ']' ? RightClosed() : nothing
+Base.tryparse(::Type{<:LeftOpenness}, c::AbstractChar) = c == '(' ? LeftOpen() : c == '[' ? LeftClosed() : nothing
+Base.tryparse(::Type{<:RightOpenness}, c::AbstractChar) = c == ')' ? RightOpen() : c == ']' ? RightClosed() : nothing
 
 Base.print(io::IO, ::Type{LeftOpen}) = print(io, "(")
 Base.print(io::IO, ::Type{LeftClosed}) = print(io, "[")
@@ -54,17 +54,17 @@ Base.print(io::IO, ::Type{RightClosed}) = print(io, "]")
 
 abstract type Domain{T} end
 abstract type AUncertainty{T} <: Domain{T} end # TODO: Should no longer be needed when delayed types are supported.
-const _Uncertainty{T} = Union{T, AUncertainty{T}} # TODO: Should no longer be needed when delayed types are supported.
-const _LeftUncertainty{T} = Union{NegativeInfinity, _Uncertainty{T}} # TODO: Should no longer be needed when delayed types are supported.
-const _RightUncertainty{T} = Union{PositiveInfinity, _Uncertainty{T}} # TODO: Should no longer be needed when delayed types are supported.
+const _Inner{T} = Union{T, AUncertainty{T}} # TODO: Should no longer be needed when delayed types are supported.
+const _LeftInner{T} = Union{NegativeInfinity, _Inner{T}} # TODO: Should no longer be needed when delayed types are supported.
+const _RightInner{T} = Union{PositiveInfinity, _Inner{T}} # TODO: Should no longer be needed when delayed types are supported.
 
-# abstract type ABound{O <: Openness, U <: _Uncertainty} end # TODO: `_Uncertainty` should be `Uncertainty` when supported
+# abstract type ABound{O <: Openness, U <: _Inner} end # TODO: `_Inner` should be `Inner` when supported
 # """
-#     Bound{O <: Openness, U <: _Uncertainty} <: ABound{O, U}
+#     Bound{O <: Openness, U <: _Inner} <: ABound{O, U}
 
-# An interval's bound type defined by `Openness` `O` and `Uncertainty` `U`.
+# An interval's bound type defined by `Openness` `O` and `Inner` `U`.
 # """
-# struct Bound{O <: Openness, U <: _Uncertainty} <: ABound{O, U} end # TODO: `_Uncertainty` should be `Uncertainty` when supported. This way the user can use `Uncertainty` without needing to change the API in the future.
+# struct Bound{O <: Openness, U <: _Inner} <: ABound{O, U} end # TODO: `_Inner` should be `Inner` when supported. This way the user can use `Inner` without needing to change the API in the future.
 
 
 # The aliases for the different combinations use the naming scheme
@@ -97,20 +97,15 @@ const _RightUncertainty{T} = Union{PositiveInfinity, _Uncertainty{T}} # TODO: Sh
 # Deliberately avoid `Symbol`s as type parameters, but use `Union`s and/or (singleton) immutable structs. This way, the compiler can immediately know not only that the number of types is finite, but also how may different types there are and thus the `Union` optimizations can hopefully always kick in. So, ideally, it should only need a single byte to encode all combinations. Note: This is only completely the case for a specific set of types. The general property is missing until delayed types are supported.
 # abstract type AInterval{L <: Bound, R <: Bound, T} <: AUncertainty{T} end # TODO: `AUncertainty` should be `Domain` when supported
 # abstract type AInterval{L_O <: Openness, R_O <: Openness, L, R, T} <: AUncertainty{T}  end
-abstract type AInterval{LO <: LeftOpenness, RO <: RightOpenness, L <:_LeftUncertainty, R <:_RightUncertainty, T} <: AUncertainty{T} end # TODO: `AUncertainty` should be `Domain` when supported
-
-# Base.print(io::IO, x::AInterval{L,R}) where {L,R} = print(io, left_string(L, x.left), " … ", right_string(R, x.right))
-Base.print(io::IO, x::AInterval{LO, RO}) where {LO, RO} = print(io, LO, x.left, ", ", x.right, RO)
-# Base.print(io::IO, x::AInterval{LO, RO}) where {LO, RO} = print(io, LO |> left_string, x.left, " … ", x.right, RO |> right_string) # This would not need a `Bound` at all
-Base.show(io::IO, ::MIME"text/plain", x::AInterval) = print(io, x)
+abstract type AInterval{LO <: LeftOpenness, RO <: RightOpenness, L <:_LeftInner, R <:_RightInner, T} <: AUncertainty{T} end # TODO: `AUncertainty` should be `Domain` when supported
 
 # What would probably be a better definition, which is not supported at least including Julia 1.13:
-# struct Interval{L <: Bound{<:Openness, UL <:_Uncertainty{T}}, R <: Bound{<:Openness, UR <:_Uncertainty{T}}} <: AInterval{L, R, T} where T
+# struct Interval{L <: Bound{<:Openness, UL <:_Inner{T}}, R <: Bound{<:Openness, UR <:_Inner{T}}} <: AInterval{L, R, T} where T
 #     left::UL
 #     right::UR
 # end where {UL, UT}
 # or
-# struct Interval{B_L <: Bound{<:Openness, L}, B_R <: Bound{<:Openness, R}} where {T, L <: _Uncertainty{T}, R <:_Uncertainty{T}}
+# struct Interval{B_L <: Bound{<:Openness, L}, B_R <: Bound{<:Openness, R}} where {T, L <: _Inner{T}, R <:_Inner{T}}
 #     left::L
 #     right::R
 # end
@@ -124,7 +119,7 @@ Base.show(io::IO, ::MIME"text/plain", x::AInterval) = print(io, x)
 #
 # Both uncertainties shall depend on the same `T`. Therefore, `T` must be defined before the uncertainties, although `T` being the last parameter would be more natural for internal usage when defining the different kind of concrete Interval aliases. All the other parameters are in the same order as in the naming scheme.
 """
-    Interval{T, L <:_LeftUncertainty{T}, R <:_RightUncertainty{T}, LO <: LeftOpenness, RO <: RightOpenness} <: AInterval{Bound{LO, L}, Bound{RO, R}, T}
+    Interval{T ≮: Interval, L <:_LeftInner{T}, R <:_RightInner{T}, LO <: LeftOpenness, RO <: RightOpenness} <: AInterval{Bound{LO, L}, Bound{RO, R}, T}
 
 An interval where the endpoints can have uncertainty.
 
@@ -138,38 +133,29 @@ that `a1 < a < a2` holds for the true value `a` of the left endpoint.
 
 When the uncertainty is `NegativeInfinity` or `PositiveInfinity`, the corresponding
 `Openness` needs to be `Open`.
+
+Elements of an `Interval` shall not be `Interval`s. This is because `T` is required to have
+an ordering relation, which `Interval`s do not generally have. This restriction may be
+relaxed in the future for special cases such as `Ray`s.
 """
-struct Interval{T, L <: _LeftUncertainty{T}, R <: _RightUncertainty{T}, LO <: LeftOpenness, RO <: RightOpenness} <: AInterval{LO, RO, L, R, T}
+struct Interval{T, L <: _LeftInner{T}, R <: _RightInner{T}, LO <: LeftOpenness, RO <: RightOpenness} <: AInterval{LO, RO, L, R, T}
     left::L
     right::R
 
-    function Interval{T, L, R, LO, RO}(left::L, right::R) where {T, L <: _LeftUncertainty{T}, R <: _RightUncertainty{T}, LO <: LeftOpenness, RO <: RightOpenness}
+    # At least with Julia 1.13 it is impossible to constraint the type parameters adequately. Therefore constraint at least the constructed objects.
+    @inline function Interval{T, L, R, LO, RO}(left::L, right::R) where {T, L <: _LeftInner{T}, R <: _RightInner{T}, LO <: LeftOpenness, RO <: RightOpenness}
         (L == NegativeInfinity && LO == LeftClosed || R == PositiveInfinity && RO == RightClosed ) && "Infinite closed bound detected" |> ArgumentError |> throw
+        T <: Interval && "Elements of an `Interval` shall not be `Interval`s" |> ArgumentError |> throw
         new{T, L, R, LO, RO}(left, right)
     end
 end
 
-# `Interval{LO,RO}(left::T, right::T)` is not possible with the above ordering of the type parameters.
-# @inline Interval(::LO, ::RO, left::T, right::T) where {LO <: Openness, RO <: Openness, T} = Interval{T, T, T, LO, RO}(left, right)
-@inline Interval(LO::Type{<:LeftOpenness}, RO::Type{<:RightOpenness}, left::T, right::T) where T = Interval{T, T, T, LO, RO}(left, right)
-
-# Interval{T, T, T, LO, RO}(left::T, right::T) where {T, LO <: LeftOpenness, RO <: RightOpenness} = Interval{T, T, T, LO, RO}(left, right)
-
-# The aliases for the different combinations use the naming scheme: `Left`[`Uncertainty`]`Right`[`Uncertainty`][`Openness`][`Openness`]`Interval`
-# with the additional rules
-# - `Openness` is used only once, if both `Openness` values are identical for the interval, so we have {Open, Closed, OpenClosed, ClosedOpen}.
-# - `Uncertainty` uses the following values {, OpenInf, OpenSup, ClosedInf, ClosedSup, OpenInfSup, ClosedInfSup, OpenInfClosedSup, ClosedInfOpenSup, } plus either `NegativeInfinity` or `PositiveInfinity`.
-# - `Uncertainty` is used only once, if both `Uncertainty` values are identical for the interval. In this case `Left` and `Right` is omitted.
-# - `Left` or `Right` is omitted if the corresponding bound is not uncertain, i.e. uses `T`.
-# - `Uncertainty` and `Openness` is omitted and `Interval` is changed into `Ray`, if the corresponding uncertainty is infinite. This matches the terms used in http://www.mathmatique.com/naive-set-theory/relations/intervals
-# This leads to the following number of combinations per T: (2 * (1 + 4 + 4))^2 + 2 * (9 * 2) = (2 * 9)^2 + 2 * 18 = 18^2 + 36 = 324 + 36 = 360
-
-
-
-const RightOpenRay{T} = Interval{T, T, PositiveInfinity, LeftOpen, RightOpen}
-const LeftOpenRay{T} = Interval{T, NegativeInfinity, T, LeftOpen, RightOpen}
-const RightClosedRay{T} = Interval{T, T, PositiveInfinity, LeftClosed, RightOpen}
-const LeftClosedRay{T} = Interval{T, NegativeInfinity, T, LeftOpen, RightClosed}
+const RightRay{T, LO <: LeftOpenness} = Interval{T, T, PositiveInfinity, LO, RightOpen}
+const LeftRay{T, RO <: RightOpenness} = Interval{T, NegativeInfinity, T, LeftOpen, RO}
+const RightOpenRay{T} = RightRay{T, LeftOpen}
+const LeftOpenRay{T} = LeftRay{T, RightOpen}
+const RightClosedRay{T} = RightRay{T, LeftClosed}
+const LeftClosedRay{T} = LeftRay{T, RightClosed}
 const CertainRay{T} = Union{RightOpenRay{T}, LeftOpenRay{T}, RightClosedRay{T}, LeftClosedRay{T}}
 
 const OpenInf{T} = RightOpenRay{T}
@@ -192,41 +178,116 @@ const GreaterThan{T} = RightOpenRay{T}
 
 const Greater{T} = RightOpenRay{T}
 const GreaterEqual{T} = RightClosedRay{T}
-const Smaller{T} = LeftOpenRay{T}
-const SmallerEqual{T} = LeftClosedRay{T}
-const Comparison{T} = Union{Greater{T}, GreaterEqual{T}, Smaller{T}, SmallerEqual{T}}
+const Less{T} = LeftOpenRay{T}
+const LessEqual{T} = LeftClosedRay{T}
+const Comparison{T} = Union{Greater{T}, GreaterEqual{T}, Less{T}, LessEqual{T}}
 
 
-const OpenInterval{T} = Interval{T, T, T, LeftOpen, RightOpen}
-const ClosedInterval{T} = Interval{T, T, T, LeftClosed, RightClosed}
-const OpenClosedInterval{T} = Interval{T, T, T, LeftOpen, RightClosed}
-const ClosedOpenInterval{T} = Interval{T, T, T, LeftClosed, RightOpen}
-const CertainInterval{T} = Union{OpenInterval{T}, ClosedInterval{T}, OpenClosedInterval{T}, ClosedOpenInterval{T}}
+const RegularInterval{T, LO <: LeftOpenness, RO <: RightOpenness} = Interval{T, T, T, LO, RO}
+const OpenRegular{T} = RegularInterval{T, LeftOpen, RightOpen}
+const ClosedRegular{T} = RegularInterval{T, LeftClosed, RightClosed}
+const OpenClosedRegular{T} = RegularInterval{T, LeftOpen, RightClosed}
+const ClosedOpenRegular{T} = RegularInterval{T, LeftClosed, RightOpen}
+const CertainInterval{T} = Union{OpenRegular{T}, ClosedRegular{T}, OpenClosedRegular{T}, ClosedOpenRegular{T}}
 
-const OpenInfOpenSup{T} = OpenInterval{T}
-const ClosedInfClosedSup{T} = ClosedInterval{T}
-const OpenInfClosedSup{T} = OpenClosedInterval{T}
-const ClosedInfOpenSup{T} = ClosedOpenInterval{T}
+const OpenInfOpenSup{T} = OpenRegular{T}
+const ClosedInfClosedSup{T} = ClosedRegular{T}
+const OpenInfClosedSup{T} = OpenClosedRegular{T}
+const ClosedInfOpenSup{T} = ClosedOpenRegular{T}
 
-const OpenOpen{T} = OpenInterval{T}
-const ClosedClosed{T} = ClosedInterval{T}
-const OpenClosed{T} = OpenClosedInterval{T}
-const ClosedOpen{T} = ClosedOpenInterval{T}
+const InnerInterval{T} = Union{CertainRay{T}, CertainInterval{T}}
+# The uncertainty can only be expressed with values within a *certain* range to avoid infinite recursion. So it is no contradiction at all to define the `Uncertainty` with a certain value, a certain ray or a certain interval, but instead it is an absolute necessity.
+const Inner{T} = Union{T, InnerInterval{T}}
+const LeftInner{T} = Union{NegativeInfinity, Inner{T}}
+const RightInner{T} = Union{PositiveInfinity, Inner{T}}
 
-# The uncertainty can only be expressed with values within a *certain* range to avoid infinite recursion. So it is no contradiction at all define the `Uncertainty` with a certain value, a certain ray or a certain interval, but instead it is an absolute necessity.
-const Uncertainty{T} = Union{T, CertainRay{T}, CertainInterval{T}}
-const LeftUncertainty{T} = Union{NegativeInfinity, Uncertainty{T}}
-const RightUncertainty{T} = Union{PositiveInfinity, Uncertainty{T}}
+const OpenOpenInner{T} = OpenRegular{T}
+const ClosedClosedInner{T} = ClosedRegular{T}
+const OpenClosedInner{T} = OpenClosedRegular{T}
+const ClosedOpenInner{T} = ClosedOpenRegular{T}
 
-@inline OpenOpen(left::T, right::T) where T = Interval{T, T, T, LeftOpen, RightOpen}(left, right)
-@inline ClosedClosed(left::T, right::T) where T = Interval{T, T, T, LeftClosed, RightClosed}(left, right)
-@inline OpenClosed(left::T, right::T) where T = Interval{T, T, T, LeftOpen, RightClosed}(left, right)
-@inline ClosedOpen(left::T, right::T) where T = Interval{T, T, T, LeftClosed, RightOpen}(left, right)
+const OpenOpen{T,L,R} = Interval{T, L, R, LeftOpen, RightOpen}
+const ClosedClosed{T,L,R} = Interval{T, L, R, LeftClosed, RightClosed}
+const OpenClosed{T,L,R} = Interval{T, L, R, LeftOpen, RightClosed}
+const ClosedOpen{T,L,R} = Interval{T, L, R, LeftClosed, RightOpen}
 
-@inline OpenInf(left::T) where T = Interval{T, T, PositiveInfinity, LeftOpen, RightOpen}(left, ∞)
-@inline OpenSup(left::T) where T = Interval{T, NegativeInfinity, T, LeftOpen, RightOpen}(∞, right)
-@inline ClosedInf(left::T) where T = Interval{T, T, PositiveInfinity, LeftClosed, RightOpen}(left, ∞)
-@inline ClosedSup(left::T) where T = Interval{T, NegativeInfinity, T, LeftOpen, RightClosed}(∞, right)
+const LeftRight{LO <: LeftOpenness, RO <: RightOpenness} = Interval{T, L, R, LO, RO} where {T,L,R}
+
+
+# If there is an official constructor accepting `(left::T, right::T) where T`, it is more specific than `(left::L, right::R) where {L,R}` and thus the former constructor needs to implement special logic for `T` being an `Interval`.
+
+# TODO: We want to have a constructor with the single parameter `T`, as only that one should be provided when constructing it. This means we should think about whether `OpenOpen` really should be limited to be the `RegularInterval`, because from the constructor, it could be derived whether it is a `RegularInterval` or not. So we would need to define the four constructors for OpenOpen{T}, ClosedClosed{T}, OpenClosed{T} and ClosedOpen{T} all sending towards a helper.
+
+
+@inline OpenOpen(left::L, right::R) where {L,R} = LeftRight{LeftOpen, RightOpen}(left, right)
+@inline ClosedClosed(left::L, right::R) where {L,R} = LeftRight{LeftClosed, RightClosed}(left, right)
+@inline OpenClosed(left::L, right::R) where {L,R} = LeftRight{LeftOpen, RightClosed}(left, right)
+@inline ClosedOpen(left::L, right::R) where {L,R} = LeftRight{LeftClosed, RightOpen}(left, right)
+
+# TODO: Define eltype(x::InnerInterval)
+
+# @inline function Interval{T, L, R, LeftOpen, RightOpen}(left::L, right::R) where {T,L,R}
+@inline function LeftRight{LO, RO}(left::L, right::R) where {LO <: LeftOpenness, RO <: RightOpenness, L, R}
+    LT = L <: InnerInterval ? eltype(L) : L
+    RT = R <: InnerInterval ? eltype(R) : R
+
+    if L <: InnerInterval || R <: InnerInterval
+        _Interval(left, right)
+    elseif L == R
+        Interval{L, L, L, LO, RO}(left, right)
+    else
+        MethodError(ClosedClosed, (L, R)) |> throw
+    end
+end
+
+# @inline _Interval(left::L, right::R) where {L<:Inner{T}, R<:Inner{T}} where T = Interval{T, L, R, LeftClosed, RightClosed}(left, right)
+
+# `Interval{LO,RO}(left::T, right::T)` is not possible with the above ordering of the type parameters.
+# @inline Interval(::LO, ::RO, left::T, right::T) where {LO <: Openness, RO <: Openness, T} = Interval{T, T, T, LO, RO}(left, right)
+@inline Interval(LO::Type{<:LeftOpenness}, RO::Type{<:RightOpenness}, left::T, right::T) where T = Interval{T, T, T, LO, RO}(left, right)
+
+# Interval{T, T, T, LO, RO}(left::T, right::T) where {T, LO <: LeftOpenness, RO <: RightOpenness} = Interval{T, T, T, LO, RO}(left, right)
+
+# @inline Interval{T, T, PositiveInfinity, LO, RightOpen}(left::T) where {T, LO <: LeftOpenness} = Interval{T, T, PositiveInfinity, LO, RightOpen}(left, +∞)
+
+# The aliases for the different combinations use the naming scheme: `Left`[`Uncertainty`]`Right`[`Uncertainty`][`Openness`][`Openness`]`Interval`
+# with the additional rules
+# - `Openness` is used only once, if both `Openness` values are identical for the interval, so we have {Open, Closed, OpenClosed, ClosedOpen}.
+# - `Uncertainty` uses the following values {, OpenInf, OpenSup, ClosedInf, ClosedSup, OpenInfSup, ClosedInfSup, OpenInfClosedSup, ClosedInfOpenSup, } plus either `NegativeInfinity` or `PositiveInfinity`.
+# - `Uncertainty` is used only once, if both `Uncertainty` values are identical for the interval. In this case `Left` and `Right` is omitted.
+# - `Left` or `Right` is omitted if the corresponding bound is not uncertain, i.e. uses `T`.
+# - `Uncertainty` and `Openness` is omitted and `Interval` is changed into `Ray`, if the corresponding uncertainty is infinite. This matches the terms used in http://www.mathmatique.com/naive-set-theory/relations/intervals
+# This leads to the following number of combinations per T: (2 * (1 + 4 + 4))^2 + 2 * (9 * 2) = (2 * 9)^2 + 2 * 18 = 18^2 + 36 = 324 + 36 = 360
+
+
+
+
+
+# @inline OpenOpen(left::T, right::T) where T = Interval{T, T, T, LeftOpen, RightOpen}(left, right)
+# @inline ClosedClosed(left::T, right::T) where T = Interval{T, T, T, LeftClosed, RightClosed}(left, right)
+# @inline OpenClosed(left::T, right::T) where T = Interval{T, T, T, LeftOpen, RightClosed}(left, right)
+# @inline ClosedOpen(left::T, right::T) where T = Interval{T, T, T, LeftClosed, RightOpen}(left, right)
+
+
+# (Probably) works, but is quite specific
+# @inline function ClosedClosed(left::L, right::R) where {L,R}
+#     if L <: Union{CertainRay, CertainInterval} || R <: Union{CertainRay, CertainInterval}
+#         _Interval(left, right)
+#     elseif L == R
+#         Interval{L, L, L, LeftClosed, RightClosed}(left, right)
+#     else
+#         MethodError(ClosedClosed, (L, R)) |> throw
+#     end
+# end
+
+# @inline ClosedClosed(left::L, right::R) where {L<:LeftInner{T}, R<:RightInner{T}} where T = Interval{T, L, R, LeftClosed, RightClosed}(left, right)
+# @inline ClosedClosed(left::L, right::R) where {L<:Inner{T}, R<:Inner{T}} where T = Interval{T, L, R, LeftClosed, RightClosed}(left, right)
+# @inline Interval(left::L, right::R) where {L<:Inner{T}, R<:Inner{T}} where T = Interval{T, L, R, LeftClosed, RightClosed}(left, right)
+
+@inline Greater(left::T) where T = RightRay{T, LeftOpen}(left, +∞)
+@inline GreaterEqual(left::T) where T = RightRay{T, LeftClosed}(left, +∞)
+@inline Less(right::T) where T = LeftRay{T, RightOpen}(-∞, right)
+@inline LessEqual(right::T) where T = LeftRay{T, RightClosed}(-∞, right)
 
 # const LeftClosedInfOpenSupRightOpenInfClosedSupOpenClosedInterval{T} = Interval{T, ClosedOpen, OpenClosed, Open, Closed}
 # const LeftClosedOpenRightOpenClosedIntervalOpenClosed{T} = Interval{T, ClosedOpen, OpenClosed, Open, Closed}
@@ -275,35 +336,59 @@ const ClosedOpenLeft_OpenClosedRight_OpenClosedInterval{T} = Interval{T, ClosedO
 # 2 …⁽ 4
 # 2 …₍ 4
 
+Base.print(io::IO, x::AInterval{LO, RO}) where {LO, RO} = print(io, LO, x.left, ", ", x.right, RO)
+Base.print(io::IO, x::Greater) = print(io, ">", x.left)
+Base.print(io::IO, x::GreaterEqual) = print(io, "≥", x.left)
+Base.print(io::IO, x::Less) = print(io, "<", x.right)
+Base.print(io::IO, x::LessEqual) = print(io, "≤", x.right)
 
-function Base.tryparse(::Type{<:CertainInterval{T}}, s::AbstractString) where T
+Base.show(io::IO, ::MIME"text/plain", x::AInterval) = print(io, x)
+
+function Base.tryparse(::Type{<:CertainInterval{T}}, str::AbstractString) where T
     # We want to do `match(r"([([])\s*([^,]+)\s*,\s*([^,]+)\s*([)\]])", s)`, but allocation-free
+
+    s = strip(str)
 
     @⊤ ncodeunits(s) >= ncodeunits("(1,2)")
     @∃ left_openness = tryparse(LeftOpenness, s |> first)
     @∃ right_openness = tryparse(RightOpenness, s |> last)
 
-    @∃ n = findnext(',', s, 2) # 2 is correct, as the parenthesis/bracket at position [1] is ASCII
+    return tryparse_inner(CertainInterval{T}, @view(s[2:end-1]), left_openness, right_openness) # Indexing is correct as the first and the last are ASCII
+end
+
+@inline function tryparse_inner(::Type{<:CertainInterval{T}}, s::AbstractString, left_openness::LeftOpenness, right_openness::RightOpenness) where T
+    @∃ n = findnext(',', s, 1)
     @∄ findnext(',', s, n+1) # +1 is correct, as the comma is ASCII
 
-    @∃ left = tryparse(T, @view s[2 : prevind(s, n)])
-    @∃ right = tryparse(T, @view s[n+1 : lastindex(s)-1])
+    @∃ left = tryparse(T, @view s[1 : prevind(s, n)])
+    @∃ right = tryparse(T, @view s[n+1 : end])
 
-    # return Interval(left_openness, right_openness, left, right)::CertainInterval{T}
-    # return Interval{T, T, T, left_openness |> typeof, right_openness |> typeof}(left, right)
+    # return Interval(left_openness, right_openness, left, right)::CertainInterval{T} # Julia should be able to efficiently handle this
+    # return Interval{T, T, T, left_openness |> typeof, right_openness |> typeof}(left, right) # or at least handle this
     isclosed(left_openness) && isclosed(right_openness) && return ClosedClosed{T}(left, right)
     isopen(left_openness) && isopen(right_openness) && return OpenOpen{T}(left, right)
     isclosed(left_openness) && isopen(right_openness) && return ClosedOpen{T}(left, right)
-    return OpenClosed{T}(left, right)
+    return OpenClosed{T}(left, right) # or at least efficiently handle this – but it can't with Julia 1.13, although this is the least inefficient
 end
 
+Base.tryparse(::Type{<:Greater{T}},      s::AbstractString) where T = s[1] == '>' ? tryparse(T, @view s[1+ncodeunits('>') : end]) |> Greater      : nothing
+Base.tryparse(::Type{<:GreaterEqual{T}}, s::AbstractString) where T = s[1] == '≥' ? tryparse(T, @view s[1+ncodeunits('≥') : end]) |> GreaterEqual : nothing
+Base.tryparse(::Type{<:Less{T}},         s::AbstractString) where T = s[1] == '<' ? tryparse(T, @view s[1+ncodeunits('<') : end]) |> Less         : nothing
+Base.tryparse(::Type{<:LessEqual{T}},    s::AbstractString) where T = s[1] == '≤' ? tryparse(T, @view s[1+ncodeunits('≤') : end]) |> LessEqual    : nothing
 
+function Base.tryparse(::Type{<:Comparison{T}}, s::AbstractString) where T
+    @∃⏎ tryparse(Greater{T}, s)
+    @∃⏎ tryparse(GreaterEqual{T}, s)
+    @∃⏎ tryparse(Less{T}, s)
+    @∃⏎ tryparse(LessEqual{T}, s)
+end
 
-#=
-
-=#
 # function Base.parse(::Type{<:AInterval{T}}, s::AbstractString) where T # wrong parameter order in AInterval
-function Base.tryparse(::Type{<:Interval{T}}, s::AbstractString) where T
+function Base.tryparse(::Type{<:Interval{T}}, str::AbstractString) where T
+    s = strip(str)
+
+    @∃⏎ tryparse(Comparison{T}, s)
+
     @⊤ ncodeunits(s) >= ncodeunits("(1,2)")
     @∃ left_openness = tryparse(LeftOpenness, s |> first)
     @∃ right_openness = tryparse(RightOpenness, s |> last)
