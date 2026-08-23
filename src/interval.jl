@@ -53,8 +53,8 @@ Base.print(io::IO, ::Type{RightClosed}) = print(io, "]")
 
 
 abstract type Domain{T} end
-abstract type AUncertainty{T} <: Domain{T} end # TODO: Should no longer be needed when delayed types are supported.
-const _Inner{T} = Union{T, AUncertainty{T}} # TODO: Should no longer be needed when delayed types are supported.
+abstract type AInner{T} <: Domain{T} end # TODO: Should no longer be needed when delayed types are supported.
+const _Inner{T} = Union{T, AInner{T}} # TODO: Should no longer be needed when delayed types are supported.
 const _LeftInner{T} = Union{NegativeInfinity, _Inner{T}} # TODO: Should no longer be needed when delayed types are supported.
 const _RightInner{T} = Union{PositiveInfinity, _Inner{T}} # TODO: Should no longer be needed when delayed types are supported.
 
@@ -97,7 +97,7 @@ const _RightInner{T} = Union{PositiveInfinity, _Inner{T}} # TODO: Should no long
 # Deliberately avoid `Symbol`s as type parameters, but use `Union`s and/or (singleton) immutable structs. This way, the compiler can immediately know not only that the number of types is finite, but also how may different types there are and thus the `Union` optimizations can hopefully always kick in. So, ideally, it should only need a single byte to encode all combinations. Note: This is only completely the case for a specific set of types. The general property is missing until delayed types are supported.
 # abstract type AInterval{L <: Bound, R <: Bound, T} <: AUncertainty{T} end # TODO: `AUncertainty` should be `Domain` when supported
 # abstract type AInterval{L_O <: Openness, R_O <: Openness, L, R, T} <: AUncertainty{T}  end
-abstract type AInterval{LO <: LeftOpenness, RO <: RightOpenness, L <:_LeftInner, R <:_RightInner, T} <: AUncertainty{T} end # TODO: `AUncertainty` should be `Domain` when supported
+abstract type AInterval{Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <:_LeftInner, R <:_RightInner, T} <: AInner{T} end # TODO: `AUncertainty` should be `Domain` when supported
 
 # What would probably be a better definition, which is not supported at least including Julia 1.13:
 # struct Interval{L <: Bound{<:Openness, UL <:_Inner{T}}, R <: Bound{<:Openness, UR <:_Inner{T}}} <: AInterval{L, R, T} where T
@@ -119,7 +119,7 @@ abstract type AInterval{LO <: LeftOpenness, RO <: RightOpenness, L <:_LeftInner,
 #
 # Both uncertainties shall depend on the same `T`. Therefore, `T` must be defined before the uncertainties, although `T` being the last parameter would be more natural for internal usage when defining the different kind of concrete Interval aliases. All the other parameters are in the same order as in the naming scheme.
 """
-    Interval{T ≮: Interval, L <:_LeftInner{T}, R <:_RightInner{T}, LO <: LeftOpenness, RO <: RightOpenness} <: AInterval{Bound{LO, L}, Bound{RO, R}, T}
+    Interval{T ≮: Interval, L <:_LeftInner{T}, R <:_RightInner{T}, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} <: AInterval{Bound{Oₗ, L}, Bound{Oᵣ, R}, T}
 
 An interval where the endpoints can have uncertainty.
 
@@ -138,20 +138,20 @@ Elements of an `Interval` shall not be `Interval`s. This is because `T` is requi
 an ordering relation, which `Interval`s do not generally have. This restriction may be
 relaxed in the future for special cases such as `Ray`s.
 """
-struct Interval{T, L <: _LeftInner{T}, R <: _RightInner{T}, LO <: LeftOpenness, RO <: RightOpenness} <: AInterval{LO, RO, L, R, T}
+struct Interval{T, L <: _LeftInner{T}, R <: _RightInner{T}, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} <: AInterval{Oₗ, Oᵣ, L, R, T}
     left::L
     right::R
 
     # At least with Julia 1.13 it is impossible to constraint the type parameters adequately. Therefore constraint at least the constructed objects.
-    @inline function Interval{T, L, R, LO, RO}(left::L, right::R) where {T, L <: _LeftInner{T}, R <: _RightInner{T}, LO <: LeftOpenness, RO <: RightOpenness}
-        (L == NegativeInfinity && LO == LeftClosed || R == PositiveInfinity && RO == RightClosed ) && "Infinite closed bound detected" |> ArgumentError |> throw
+    @inline function Interval{T, L, R, Oₗ, Oᵣ}(left::L, right::R) where {T, L <: _LeftInner{T}, R <: _RightInner{T}, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness}
+        (L == NegativeInfinity && Oₗ == LeftClosed || R == PositiveInfinity && Oᵣ == RightClosed ) && "Infinite closed bound detected" |> ArgumentError |> throw
         T <: Interval && "Elements of an `Interval` shall not be `Interval`s" |> ArgumentError |> throw
-        new{T, L, R, LO, RO}(left, right)
+        new{T, L, R, Oₗ, Oᵣ}(left, right)
     end
 end
 
-const RightRay{T, LO <: LeftOpenness} = Interval{T, T, PositiveInfinity, LO, RightOpen}
-const LeftRay{T, RO <: RightOpenness} = Interval{T, NegativeInfinity, T, LeftOpen, RO}
+const RightRay{T, Oₗ <: LeftOpenness} = Interval{T, T, PositiveInfinity, Oₗ, RightOpen}
+const LeftRay{T, Oᵣ <: RightOpenness} = Interval{T, NegativeInfinity, T, LeftOpen, Oᵣ}
 const RightOpenRay{T} = RightRay{T, LeftOpen}
 const LeftOpenRay{T} = LeftRay{T, RightOpen}
 const RightClosedRay{T} = RightRay{T, LeftClosed}
@@ -183,7 +183,7 @@ const LessEqual{T} = LeftClosedRay{T}
 const Comparison{T} = Union{Greater{T}, GreaterEqual{T}, Less{T}, LessEqual{T}}
 
 
-const RegularInterval{T, LO <: LeftOpenness, RO <: RightOpenness} = Interval{T, T, T, LO, RO}
+const RegularInterval{T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} = Interval{T, T, T, Oₗ, Oᵣ}
 const OpenRegular{T} = RegularInterval{T, LeftOpen, RightOpen}
 const ClosedRegular{T} = RegularInterval{T, LeftClosed, RightClosed}
 const OpenClosedRegular{T} = RegularInterval{T, LeftOpen, RightClosed}
@@ -211,7 +211,7 @@ const ClosedClosed{T,L,R} = Interval{T, L, R, LeftClosed, RightClosed}
 const OpenClosed{T,L,R} = Interval{T, L, R, LeftOpen, RightClosed}
 const ClosedOpen{T,L,R} = Interval{T, L, R, LeftClosed, RightOpen}
 
-const LeftRight{LO <: LeftOpenness, RO <: RightOpenness} = Interval{T, L, R, LO, RO} where {T,L,R}
+const LeftRight{Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} = Interval{T, L, R, Oₗ, Oᵣ} where {T, L <: LeftInner, R <: RightInner}
 
 
 # If there is an official constructor accepting `(left::T, right::T) where T`, it is more specific than `(left::L, right::R) where {L,R}` and thus the former constructor needs to implement special logic for `T` being an `Interval`.
@@ -219,36 +219,36 @@ const LeftRight{LO <: LeftOpenness, RO <: RightOpenness} = Interval{T, L, R, LO,
 # TODO: We want to have a constructor with the single parameter `T`, as only that one should be provided when constructing it. This means we should think about whether `OpenOpen` really should be limited to be the `RegularInterval`, because from the constructor, it could be derived whether it is a `RegularInterval` or not. So we would need to define the four constructors for OpenOpen{T}, ClosedClosed{T}, OpenClosed{T} and ClosedOpen{T} all sending towards a helper.
 
 
-@inline OpenOpen(left::L, right::R) where {L,R} = LeftRight{LeftOpen, RightOpen}(left, right)
-@inline ClosedClosed(left::L, right::R) where {L,R} = LeftRight{LeftClosed, RightClosed}(left, right)
-@inline OpenClosed(left::L, right::R) where {L,R} = LeftRight{LeftOpen, RightClosed}(left, right)
-@inline ClosedOpen(left::L, right::R) where {L,R} = LeftRight{LeftClosed, RightOpen}(left, right)
+@inline OpenOpen(left::L, right::R) where {L <: LeftInner, R <: RightInner} = Interval(LeftOpen(), RightOpen(), left, right)
+@inline ClosedClosed(left::L, right::R) where {L <: LeftInner, R <: RightInner} = Interval(LeftClosed(), RightClosed(), left, right)
+@inline OpenClosed(left::L, right::R) where {L <: LeftInner, R <: RightInner} = Interval(LeftOpen(), RightClosed(), left, right)
+@inline ClosedOpen(left::L, right::R) where {L <: LeftInner, R <: RightInner} = Interval(LeftClosed(), RightOpen(), left, right)
 
 # TODO: Define eltype(x::InnerInterval)
 
-# @inline function Interval{T, L, R, LeftOpen, RightOpen}(left::L, right::R) where {T,L,R}
-@inline function LeftRight{LO, RO}(left::L, right::R) where {LO <: LeftOpenness, RO <: RightOpenness, L, R}
-    LT = L <: InnerInterval ? eltype(L) : L
-    RT = R <: InnerInterval ? eltype(R) : R
+# We can't just use a type alias of `Interval` to get `Oₗ` and `Oᵣ` as type parameters, because then this constructor would be more specific than the inner constructor, so we could not call from here into the inner constructor.
+@inline function Interval(::Oₗ, ::Oᵣ, left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: LeftInner, R <: RightInner}
+    # L <: NegativeInfinity && R <: PositiveInfinity && "Provide the element type by calling `Interval{T}(-∞, ∞)`" |> ArgumentError
+    Tₗ = L <: InnerInterval ? eltype(L) : L
+    Tᵣ = R <: InnerInterval ? eltype(R) : R
+    T = Tₗ == NegativeInfinity && Tᵣ == PositiveInfinity ? "Provide the element type by calling `Interval{T}(-∞, ∞)`" |> ArgumentError :
+        Tₗ == NegativeInfinity ? Tᵣ :
+        Tᵣ == PositiveInfinity ? Tₗ :
+        Tₗ == Tᵣ ? Tₗ :
+        "Incompatible element types `Tₗ`: $Tₗ, `Tᵣ`: $Tᵣ" |> ArgumentError
 
-    if L <: InnerInterval || R <: InnerInterval
-        _Interval(left, right)
-    elseif L == R
-        Interval{L, L, L, LO, RO}(left, right)
-    else
-        MethodError(ClosedClosed, (L, R)) |> throw
-    end
+    return Interval{T, L, R, Oₗ, Oᵣ}(left, right)
 end
 
 # @inline _Interval(left::L, right::R) where {L<:Inner{T}, R<:Inner{T}} where T = Interval{T, L, R, LeftClosed, RightClosed}(left, right)
 
-# `Interval{LO,RO}(left::T, right::T)` is not possible with the above ordering of the type parameters.
-# @inline Interval(::LO, ::RO, left::T, right::T) where {LO <: Openness, RO <: Openness, T} = Interval{T, T, T, LO, RO}(left, right)
-@inline Interval(LO::Type{<:LeftOpenness}, RO::Type{<:RightOpenness}, left::T, right::T) where T = Interval{T, T, T, LO, RO}(left, right)
+# `Interval{Oₗ,Oᵣ}(left::T, right::T)` is not possible with the above ordering of the type parameters.
+# @inline Interval(::Oₗ, ::Oᵣ, left::T, right::T) where {Oₗ <: Openness, Oᵣ <: Openness, T} = Interval{T, T, T, Oₗ, Oᵣ}(left, right)
+@inline Interval(Oₗ::Type{<:LeftOpenness}, Oᵣ::Type{<:RightOpenness}, left::T, right::T) where T = Interval{T, T, T, Oₗ, Oᵣ}(left, right)
 
-# Interval{T, T, T, LO, RO}(left::T, right::T) where {T, LO <: LeftOpenness, RO <: RightOpenness} = Interval{T, T, T, LO, RO}(left, right)
+# Interval{T, T, T, Oₗ, Oᵣ}(left::T, right::T) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} = Interval{T, T, T, Oₗ, Oᵣ}(left, right)
 
-# @inline Interval{T, T, PositiveInfinity, LO, RightOpen}(left::T) where {T, LO <: LeftOpenness} = Interval{T, T, PositiveInfinity, LO, RightOpen}(left, +∞)
+# @inline Interval{T, T, PositiveInfinity, Oₗ, RightOpen}(left::T) where {T, Oₗ <: LeftOpenness} = Interval{T, T, PositiveInfinity, Oₗ, RightOpen}(left, +∞)
 
 # The aliases for the different combinations use the naming scheme: `Left`[`Uncertainty`]`Right`[`Uncertainty`][`Openness`][`Openness`]`Interval`
 # with the additional rules
@@ -336,7 +336,7 @@ const ClosedOpenLeft_OpenClosedRight_OpenClosedInterval{T} = Interval{T, ClosedO
 # 2 …⁽ 4
 # 2 …₍ 4
 
-Base.print(io::IO, x::AInterval{LO, RO}) where {LO, RO} = print(io, LO, x.left, ", ", x.right, RO)
+Base.print(io::IO, x::AInterval{Oₗ, Oᵣ}) where {Oₗ, Oᵣ} = print(io, Oₗ, x.left, ", ", x.right, Oᵣ)
 Base.print(io::IO, x::Greater) = print(io, ">", x.left)
 Base.print(io::IO, x::GreaterEqual) = print(io, "≥", x.left)
 Base.print(io::IO, x::Less) = print(io, "<", x.right)
@@ -365,10 +365,10 @@ end
 
     # return Interval(left_openness, right_openness, left, right)::CertainInterval{T} # Julia should be able to efficiently handle this
     # return Interval{T, T, T, left_openness |> typeof, right_openness |> typeof}(left, right) # or at least handle this
-    isclosed(left_openness) && isclosed(right_openness) && return ClosedClosed{T}(left, right)
-    isopen(left_openness) && isopen(right_openness) && return OpenOpen{T}(left, right)
-    isclosed(left_openness) && isopen(right_openness) && return ClosedOpen{T}(left, right)
-    return OpenClosed{T}(left, right) # or at least efficiently handle this – but it can't with Julia 1.13, although this is the least inefficient
+    isclosed(left_openness) && isclosed(right_openness) && return ClosedClosedInner{T}(left, right)
+    isopen(left_openness) && isopen(right_openness) && return OpenOpenInner{T}(left, right)
+    isclosed(left_openness) && isopen(right_openness) && return ClosedOpenInner{T}(left, right)
+    return OpenClosedInner{T}(left, right) # or at least efficiently handle this – but it can't with Julia 1.13, although this is the least inefficient
 end
 
 Base.tryparse(::Type{<:Greater{T}},      s::AbstractString) where T = s[1] == '>' ? tryparse(T, @view s[1+ncodeunits('>') : end]) |> Greater      : nothing
