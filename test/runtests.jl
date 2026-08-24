@@ -12,6 +12,16 @@ using UseAll
     @test interval isa Interval{Float64}
 end
 
+@testset "Advanced Interval Construction" begin
+    @test ClosedOpen(4, +∞) isa Interval{Int64, Int64, PositiveInfinity, LeftClosed, RightOpen}
+    @test OpenOpen{Int}(4, +∞) isa Interval{Int64, Int64, PositiveInfinity, LeftOpen, RightOpen}
+    @test Interval{Int}(LeftOpen(), RightClosed(), -4.0, 2) == OpenClosed(-4, 2)
+end
+
+@testset "Conversion" begin
+    @test convert(ClosedOpen{Int}, ClosedClosed(1.0, 2.0)) == ClosedOpen(1, 2)
+end
+
 # Test interval parsing
 @testset "Parse Certain Intervals" begin
     @test tryparse(CertainInterval{Int}, "(1, 2)") == OpenOpen(1, 2)
@@ -34,7 +44,13 @@ end
 end
 
 @testset "Parse Uncertain Intervals" begin
-    # @test tryparse(Interval{Int}, ">4") == Greater(4)
+    @test tryparse(Interval{Int}, "[2, >4]") == ClosedClosed(2, OpenOpen(4, +∞))
+    @test tryparse(Interval{Float32}, "(≥2.0, 5.2)") == OpenOpen(ClosedOpen(2f0, +∞), 5.2f0)
+    @test tryparse(Interval{Float32}, "(≥2, 5.2)") == OpenOpen(ClosedOpen(2f0, +∞), 5.2f0)
+    @test tryparse(Interval{Float64}, "([-3.4, -2.87], ≥-1.4]") == OpenClosed(ClosedClosed(-3.4, -2.87), ClosedOpen(-1.4, +∞))
+
+    @test_throws ArgumentError OpenOpen(-∞, +∞)
+    @test tryparse(Interval{Int32}, "(-∞, ∞)") == OpenOpen{Int32}(-∞, +∞)
 end
 
 # Test infinity handling
