@@ -87,6 +87,9 @@ abstract type AInterval{Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <:_LeftIn
 # - There is no `where` support in parametric struct definitions. So you can't define a type variable by matching the type parameter of a type constraint. Thus, all needed types need to be defined first as additional types.
 #
 # Both uncertainties shall depend on the same `T`. Therefore, `T` must be defined before the uncertainties, although `T` being the last parameter would be more natural for internal usage when defining the different kind of concrete Interval aliases. All the other parameters are in the same order as in the naming scheme.
+#
+# The order of the parameters is defined according to the needs of the constructors, as they are effectively the API. `T` must be left of `L` and `R` due to the dependency. As `L` and `R` always follow from the constructor arguments, they are most often left out and therefore the last arguments.
+# TODO: change to T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <:_LeftInner{T}, R <:_RightInner{T}
 """
     Interval{T ≮: Interval, L <:_LeftInner{T}, R <:_RightInner{T}, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} <: AInterval{Bound{Oₗ, L}, Bound{Oᵣ, R}, T}
 
@@ -177,37 +180,28 @@ const ClosedClosedInner{T} = ClosedRegular{T}
 const OpenClosedInner{T} = OpenClosedRegular{T}
 const ClosedOpenInner{T} = ClosedOpenRegular{T}
 
-# The types are much more readable when the constraints on `L` and `R` are `_LeftInner{T}` and `_RightInner{T}`, respectively, instead of `LeftInner{T}` and `RightInner{T}`. They are more readable without constraints at all. However, both changes would be a deviation from the type constraints in the initial type definition as well as in the inner constructor. A change here would need a clear understanding on what this would imply and probably a lot of work to make it work.
+# The types are much more readable when the constraints on `L` and `R` are `_LeftInner{T}` and `_RightInner{T}`, respectively, instead of `LeftInner{T}` and `RightInner{T}`. They are more readable without constraints at all. We go with the former ones, because while noone adds additional subtypes, it's fully correct, still readable and consistent with the inner constructor.
 const OpenOpen{T, L <: _LeftInner{T}, R <: _RightInner{T}} = Interval{T, L, R, LeftOpen, RightOpen}
 const ClosedClosed{T, L <: _LeftInner{T}, R <: _RightInner{T}} = Interval{T, L, R, LeftClosed, RightClosed}
 const OpenClosed{T, L <: _LeftInner{T}, R <: _RightInner{T}} = Interval{T, L, R, LeftOpen, RightClosed}
 const ClosedOpen{T, L <: _LeftInner{T}, R <: _RightInner{T}} = Interval{T, L, R, LeftClosed, RightOpen}
 
-const LeftRight{Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} = Interval{T, L, R, Oₗ, Oᵣ} where {T, L <: LeftInner, R <: RightInner}
+# const LeftRight{Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} = Interval{T, L, R, Oₗ, Oᵣ} where {T, L <: LeftInner, R <: RightInner}
+const LeftRight{T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} = Interval{T, L, R, Oₗ, Oᵣ} where {L <: LeftInner, R <: RightInner}
 
+@inline Greater(left::T) where T = RightRay{T, LeftOpen}(left, +∞)
+@inline GreaterEqual(left::T) where T = RightRay{T, LeftClosed}(left, +∞)
+@inline Less(right::T) where T = LeftRay{T, RightOpen}(-∞, right)
+@inline LessEqual(right::T) where T = LeftRay{T, RightClosed}(-∞, right)
 
-# If there is an official constructor accepting `(left::T, right::T) where T`, it is more specific than `(left::L, right::R) where {L,R}` and thus the former constructor needs to implement special logic for `T` being an `Interval`.
-
-# TODO: We want to have a constructor with the single parameter `T`, as only that one should be provided when constructing it. This means we should think about whether `OpenOpen` really should be limited to be the `RegularInterval`, because from the constructor, it could be derived whether it is a `RegularInterval` or not. So we would need to define the four constructors for OpenOpen{T}, ClosedClosed{T}, OpenClosed{T} and ClosedOpen{T} all sending towards a helper.
-
-
-# @inline OpenOpen(left::L, right::R) where {T, L <: LeftInner{T}, R <: RightInner{T}} = Interval(LeftOpen(), RightOpen(), left, right)
-# @inline ClosedClosed(left::L, right::R) where {T, L <: LeftInner{T}, R <: RightInner{T}} = Interval(LeftClosed(), RightClosed(), left, right)
-# @inline OpenClosed(left::L, right::R) where {T, L <: LeftInner{T}, R <: RightInner{T}} = Interval(LeftOpen(), RightClosed(), left, right)
-# @inline ClosedOpen(left::L, right::R) where {T, L <: LeftInner{T}, R <: RightInner{T}} = Interval(LeftClosed(), RightOpen(), left, right)
-# @inline OpenOpen(left::L, right::R) where {L,R} = Interval(LeftOpen(), RightOpen(), left, right)
-# @inline ClosedClosed(left::L, right::R) where {L,R} = Interval(LeftClosed(), RightClosed(), left, right)
-# @inline OpenClosed(left::L, right::R) where {L,R} = Interval(LeftOpen(), RightClosed(), left, right)
-# @inline ClosedOpen(left::L, right::R) where {L,R} = Interval(LeftClosed(), RightOpen(), left, right)
-@inline OpenOpen(left::L, right::R) where {T, L <: _LeftInner{T}, R <: _RightInner{T}} = Interval(LeftOpen(), RightOpen(), left, right)
-@inline ClosedClosed(left::L, right::R) where {T, L <: _LeftInner{T}, R <: _RightInner{T}} = Interval(LeftClosed(), RightClosed(), left, right)
-@inline OpenClosed(left::L, right::R) where {T, L <: _LeftInner{T}, R <: _RightInner{T}} = Interval(LeftOpen(), RightClosed(), left, right)
-@inline ClosedOpen(left::L, right::R) where {T, L <: _LeftInner{T}, R <: _RightInner{T}} = Interval(LeftClosed(), RightOpen(), left, right)
-
-
+@inline OpenOpen(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval(LeftOpen(), RightOpen(), left, right)
+@inline ClosedClosed(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval(LeftClosed(), RightClosed(), left, right)
+@inline OpenClosed(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval(LeftOpen(), RightClosed(), left, right)
+@inline ClosedOpen(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval(LeftClosed(), RightOpen(), left, right)
 
 # We can't just use a type alias of `Interval` to get `Oₗ` and `Oᵣ` as type parameters, because then this constructor would be more specific than the inner constructor, so we could not call from here into the inner constructor.
-@inline function Interval(::Oₗ, ::Oᵣ, left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: LeftInner, R <: RightInner}
+# @inline function Interval{Oₗ, Oᵣ}(left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner, R <: _RightInner} # TODO: This would work if we relaxed the type constraints on the struct definition
+@inline function Interval(::Oₗ, ::Oᵣ, left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner, R <: _RightInner}
     Tₗ = L <: InnerInterval ? eltype(L) : L
     Tᵣ = R <: InnerInterval ? eltype(R) : R
     T = Tₗ == NegativeInfinity && Tᵣ == PositiveInfinity ? "Provide the element type by calling `Interval{T}(-∞, ∞)`" |> ArgumentError |> throw :
@@ -219,40 +213,23 @@ const LeftRight{Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} = Interval{T, L, R,
     return Interval{T, L, R, Oₗ, Oᵣ}(left, right)
 end
 
-# @inline function Interval{T}(::Oₗ, ::Oᵣ, left::L, right::R) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: LeftInner, R <: RightInner}
-@inline function Interval{T}(::Oₗ, ::Oᵣ, left::_LeftInner, right::_RightInner) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness}
-    # TODO: T, T, T is highly misleading!
-    # Interval{T, T, T, Oₗ, Oᵣ}(left, right)
-
-    # TODO: Use `T` wisely and convert to it.
-
-    # Tₗ = L <: InnerInterval ? eltype(L) : L
-    # Tᵣ = R <: InnerInterval ? eltype(R) : R
-    # Tₗ == NegativeInfinity ? Tᵣ :
-    #     Tᵣ == PositiveInfinity ? Tₗ :
-    #     Tₗ == Tᵣ ? Tₗ :
-    #     "Incompatible element types `Tₗ`: $Tₗ, `Tᵣ`: $Tᵣ" |> ArgumentError |> throw
-
-    # return Interval{T, L, R, Oₗ, Oᵣ}(left, right)
-
-    l = left isa NegativeInfinity ? left :
-        left isa InnerInterval ? convert(Interval{T}, left) :
-        convert(T, left)
-    r = right isa PositiveInfinity ? right :
-        right isa InnerInterval ? convert(Interval{T}, right) :
-        convert(T, right)
+@inline function LeftRight{T, Oₗ, Oᵣ}(left::_LeftInner, right::_RightInner) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness}
+# @inline function Interval{T}(::Oₗ, ::Oᵣ, left::_LeftInner, right::_RightInner) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness}
+    l, r = convert_inner(T, left), convert_inner(T, right)
     Interval{T, typeof(l), typeof(r), Oₗ, Oᵣ}(l, r)
 end
+@inline LeftRight{T, oₗ, oᵣ}(l::_LeftInner, r::_RightInner) where {T, oₗ, oᵣ} = LeftRight{T, typeof(oₗ), typeof(oᵣ)}(l, r)
 
+# If there is an official constructor accepting `(left::T, right::T) where T`, it is more specific than `(left::L, right::R) where {L,R}` and thus the former constructor needs to implement special logic for `T` being an `Interval`.
 @inline function Interval{T, <:_LeftInner{T}, <:_RightInner{T}, Oₗ, Oᵣ}(left::_LeftInner, right::_RightInner) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness}
-    l = left isa NegativeInfinity ? left :
-        left isa InnerInterval ? convert(Interval{T}, left) :
-        convert(T, left)
-    r = right isa PositiveInfinity ? right :
-        right isa InnerInterval ? convert(Interval{T}, right) :
-        convert(T, right)
+    l, r = convert_inner(T, left), convert_inner(T, right)
     Interval{T, typeof(l), typeof(r), Oₗ, Oᵣ}(l, r)
 end
+
+
+@inline convert_inner(::Type, x::Union{NegativeInfinity, PositiveInfinity}) = x
+@inline convert_inner(::Type{T}, x::InnerInterval) where T = convert(Interval{T}, x)
+@inline convert_inner(::Type{T}, x) where T = convert(T, x)
 
 @inline function Base.convert(TO::Type{<:Interval{T, L, R, Oₗ, Oᵣ} where {L <: _LeftInner, R <: _RightInner}}, x::AllInner) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness}
     x isa TO && return x
@@ -260,13 +237,25 @@ end
     return Interval{T, typeof(left), typeof(right), Oₗ, Oᵣ}(left, right)
 end
 
+Base.print(io::IO, x::AInterval{Oₗ, Oᵣ}) where {Oₗ, Oᵣ} = print(io, Oₗ, x.left, ", ", x.right, Oᵣ)
+Base.print(io::IO, x::Greater) = print(io, ">", x.left)
+Base.print(io::IO, x::GreaterEqual) = print(io, "≥", x.left)
+Base.print(io::IO, x::Less) = print(io, "<", x.right)
+Base.print(io::IO, x::LessEqual) = print(io, "≤", x.right)
 
-# `Interval{Oₗ,Oᵣ}(left::T, right::T)` is not possible with the above ordering of the type parameters.
-@inline Interval(Oₗ::Type{<:LeftOpenness}, Oᵣ::Type{<:RightOpenness}, left::T, right::T) where T = Interval{T, T, T, Oₗ, Oᵣ}(left, right)
+Base.show(io::IO, ::MIME"text/plain", x::AInterval) = print(io, x)
 
-# Interval{T, T, T, Oₗ, Oᵣ}(left::T, right::T) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} = Interval{T, T, T, Oₗ, Oᵣ}(left, right)
+Base.eltype(::Type{<:Interval{T}}) where T = T
 
-# @inline Interval{T, T, PositiveInfinity, Oₗ, RightOpen}(left::T) where {T, Oₗ <: LeftOpenness} = Interval{T, T, PositiveInfinity, Oₗ, RightOpen}(left, +∞)
+# …
+# …⁽ or …₍
+# …⁾
+# …⁽⁾(l::L, r::R) where {L,R}
+
+# 2 …⁽ 4
+# 2 …₍ 4
+
+
 
 # The aliases for the different combinations use the naming scheme: `Left`[`Uncertainty`]`Right`[`Uncertainty`][`Openness`][`Openness`]`Interval`
 # with the additional rules
@@ -278,40 +267,11 @@ end
 # This leads to the following number of combinations per T: (2 * (1 + 4 + 4))^2 + 2 * (9 * 2) = (2 * 9)^2 + 2 * 18 = 18^2 + 36 = 324 + 36 = 360
 
 
-
-
-
-# @inline OpenOpen(left::T, right::T) where T = Interval{T, T, T, LeftOpen, RightOpen}(left, right)
-# @inline ClosedClosed(left::T, right::T) where T = Interval{T, T, T, LeftClosed, RightClosed}(left, right)
-# @inline OpenClosed(left::T, right::T) where T = Interval{T, T, T, LeftOpen, RightClosed}(left, right)
-# @inline ClosedOpen(left::T, right::T) where T = Interval{T, T, T, LeftClosed, RightOpen}(left, right)
-
-
-# (Probably) works, but is quite specific
-# @inline function ClosedClosed(left::L, right::R) where {L,R}
-#     if L <: Union{CertainRay, CertainInterval} || R <: Union{CertainRay, CertainInterval}
-#         _Interval(left, right)
-#     elseif L == R
-#         Interval{L, L, L, LeftClosed, RightClosed}(left, right)
-#     else
-#         MethodError(ClosedClosed, (L, R)) |> throw
-#     end
-# end
-
-# @inline ClosedClosed(left::L, right::R) where {L<:LeftInner{T}, R<:RightInner{T}} where T = Interval{T, L, R, LeftClosed, RightClosed}(left, right)
-# @inline ClosedClosed(left::L, right::R) where {L<:Inner{T}, R<:Inner{T}} where T = Interval{T, L, R, LeftClosed, RightClosed}(left, right)
-# @inline Interval(left::L, right::R) where {L<:Inner{T}, R<:Inner{T}} where T = Interval{T, L, R, LeftClosed, RightClosed}(left, right)
-
-@inline Greater(left::T) where T = RightRay{T, LeftOpen}(left, +∞)
-@inline GreaterEqual(left::T) where T = RightRay{T, LeftClosed}(left, +∞)
-@inline Less(right::T) where T = LeftRay{T, RightOpen}(-∞, right)
-@inline LessEqual(right::T) where T = LeftRay{T, RightClosed}(-∞, right)
-
 # const LeftClosedInfOpenSupRightOpenInfClosedSupOpenClosedInterval{T} = Interval{T, ClosedOpen, OpenClosed, Open, Closed}
 # const LeftClosedOpenRightOpenClosedIntervalOpenClosed{T} = Interval{T, ClosedOpen, OpenClosed, Open, Closed}
 # const OpenClosedIntervalClosedOpenLeftOpenClosedRight{T} = Interval{T, ClosedOpen, OpenClosed, Open, Closed}
 # const ClosedOpenLeftOpenClosedRightOpenClosedInterval{T} = Interval{T, ClosedOpen, OpenClosed, Open, Closed}
-const ClosedOpenLeft_OpenClosedRight_OpenClosedInterval{T} = Interval{T, ClosedOpen, OpenClosed, LeftOpen, RightClosed}
+# const ClosedOpenLeft_OpenClosedRight_OpenClosedInterval{T} = Interval{T, ClosedOpen, OpenClosed, LeftOpen, RightClosed}
 
 # const RightOpenMinRay{T}   = Interval{Open, Open, OpenMin{T}, PositiveInfinity, T}
 # const RightOpenMaxRay{T}   = Interval{Open, Open, OpenMax{T}, PositiveInfinity, T}
@@ -345,29 +305,6 @@ const ClosedOpenLeft_OpenClosedRight_OpenClosedInterval{T} = Interval{T, ClosedO
 # const ClosedLeftMinRightMaxInterval{T} = Interval{ClosedMinBound, ClosedMaxBound, T}
 # const ClosedLeftMaxInterval{T} = Interval{ClosedMaxBound, ClosedBound, T}
 # const ClosedLeftMaxRightMinInterval{T} = Interval{ClosedMaxBound, ClosedMinBound, T}
-
-# …
-# …⁽ or …₍
-# …⁾
-# …⁽⁾(l::L, r::R) where {L,R}
-
-# 2 …⁽ 4
-# 2 …₍ 4
-
-Base.print(io::IO, x::AInterval{Oₗ, Oᵣ}) where {Oₗ, Oᵣ} = print(io, Oₗ, x.left, ", ", x.right, Oᵣ)
-Base.print(io::IO, x::Greater) = print(io, ">", x.left)
-Base.print(io::IO, x::GreaterEqual) = print(io, "≥", x.left)
-Base.print(io::IO, x::Less) = print(io, "<", x.right)
-Base.print(io::IO, x::LessEqual) = print(io, "≤", x.right)
-
-Base.show(io::IO, ::MIME"text/plain", x::AInterval) = print(io, x)
-
-Base.eltype(::Type{<:Interval{T}}) where T = T
-
-# Interval{Int, ClosedOpen, OpenClosed, Open, Closed}(2, 4) |> print
-
-
-
 
 #= Alternative:
 
