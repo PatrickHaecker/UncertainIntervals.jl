@@ -53,17 +53,6 @@ end
     @test tryparse(Interval{Int32}, "(-∞, ∞)") == OpenOpen{Int32}(-∞, +∞)
 end
 
-# Test infinity handling
-# TODO: Fix
-# @testset "Infinity Handling" begin
-#     # Test negative infinity
-#     neg_inf = Interval(Open, Open, NegativeInfinity, 5.0)
-#     @test neg_inf.left == NegativeInfinity
-
-#     # Test positive infinity
-#     pos_inf = Interval(Open, Open, 5.0, PositiveInfinity)
-#     @test pos_inf.right == PositiveInfinity
-# end
 
 # Test macro functionality
 @testset "Macro Functionality" begin
@@ -78,27 +67,3 @@ end
 #     str = @i_str "test"
 #     @test str == "test"
 # end
-
-# Test helper functions
-# @testset "Helper Functions" begin
-#     # Test left_tryparse
-#     @test left_tryparse(Openness, '(') == Open()
-#     @test left_tryparse(Openness, '[') == Closed()
-#     @test left_tryparse(Openness, 'a') === nothing
-
-#     # Test right_tryparse
-#     @test right_tryparse(Openness, ')') == Open()
-#     @test right_tryparse(Openness, ']') == Closed()
-#     @test right_tryparse(Openness, 'a') === nothing
-# end
-
-# Test interval printing
-# @testset "Interval Printing" begin
-#     # Test that intervals can be printed
-#     interval = Interval(Closed, Closed, 1, 2)
-#     io = IOBuffer()
-#     print(io, interval)
-#     output = String(take!(io))
-#     @test output != ""
-# end
-

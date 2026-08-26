@@ -49,14 +49,14 @@ end
     @∃ left = tryparse(T, @view s[1 : prevind(s, n)])
     @∃ right = tryparse(T, @view s[n+1 : end])
 
-    # return Interval(left_openness, right_openness, left, right)::CertainInterval{T} # Julia should be able to efficiently handle this
-    # return Interval{T, T, T, left_openness |> typeof, right_openness |> typeof}(left, right) # or at least handle this
+    # return Interval{left_openness, right_openness}(left, right)::CertainInterval{T} # Julia should be able to efficiently handle this
     isclosed(left_openness) && isclosed(right_openness) && return ClosedClosedInner{T}(left, right)
     isopen(left_openness) && isopen(right_openness) && return OpenOpenInner{T}(left, right)
     isclosed(left_openness) && isopen(right_openness) && return ClosedOpenInner{T}(left, right)
     return OpenClosedInner{T}(left, right) # or at least efficiently handle this – but it can't with Julia 1.13, although this is the least inefficient
 end
 
+# TODO: Generate
 Base.tryparse(::Type{<:Greater{T}},      s::AbstractString) where T = s[1] == '>' ? tryparse(T, @view s[1+ncodeunits('>') : end]) |> Greater      : nothing
 Base.tryparse(::Type{<:GreaterEqual{T}}, s::AbstractString) where T = s[1] == '≥' ? tryparse(T, @view s[1+ncodeunits('≥') : end]) |> GreaterEqual : nothing
 Base.tryparse(::Type{<:Less{T}},         s::AbstractString) where T = s[1] == '<' ? tryparse(T, @view s[1+ncodeunits('<') : end]) |> Less         : nothing

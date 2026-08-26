@@ -191,14 +191,14 @@ const ClosedOpen{T, L <: _LeftInner{T}, R <: _RightInner{T}} = Interval{T, L, R,
 @inline Less(right::T) where T = LeftRay{T, RightOpen}(-∞, right)
 @inline LessEqual(right::T) where T = LeftRay{T, RightClosed}(-∞, right)
 
-@inline OpenOpen(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval(LeftOpen(), RightOpen(), left, right)
-@inline ClosedClosed(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval(LeftClosed(), RightClosed(), left, right)
-@inline OpenClosed(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval(LeftOpen(), RightClosed(), left, right)
-@inline ClosedOpen(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval(LeftClosed(), RightOpen(), left, right)
+@inline OpenOpen(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval{LeftOpen, RightOpen}(left, right)
+@inline ClosedClosed(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval{LeftClosed, RightClosed}(left, right)
+@inline OpenClosed(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval{LeftOpen, RightClosed}(left, right)
+@inline ClosedOpen(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval{LeftClosed, RightOpen}(left, right)
 
 # We can't just use a type alias of `Interval` to get `Oₗ` and `Oᵣ` as type parameters, because then this constructor would be more specific than the inner constructor, so we could not call from here into the inner constructor.
 # @inline function Interval{Oₗ, Oᵣ}(left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner, R <: _RightInner} # TODO: This would work if we relaxed the type constraints on the struct definition
-@inline function Interval(::Oₗ, ::Oᵣ, left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner, R <: _RightInner}
+@inline function Interval{Oₗ, Oᵣ}(left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner, R <: _RightInner}
     Tₗ = L <: InnerInterval ? eltype(L) : L
     Tᵣ = R <: InnerInterval ? eltype(R) : R
     T = Tₗ == NegativeInfinity && Tᵣ == PositiveInfinity ? "Provide the element type by calling `Interval{T}(-∞, ∞)`" |> ArgumentError |> throw :
