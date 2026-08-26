@@ -13,8 +13,8 @@ using UseAll
 end
 
 @testset "Advanced Interval Construction" begin
-    @test ClosedOpen(4, +∞) isa Interval{Int64, Int64, PositiveInfinity, LeftClosed, RightOpen}
-    @test OpenOpen{Int}(4, +∞) isa Interval{Int64, Int64, PositiveInfinity, LeftOpen, RightOpen}
+    @test ClosedOpen(4, +∞) isa Interval{Int64, LeftClosed, RightOpen, Int64, PositiveInfinity}
+    @test OpenOpen{Int}(4, +∞) isa Interval{Int64, LeftOpen, RightOpen, Int64, PositiveInfinity}
     @test Interval{Int, LeftOpen, RightClosed}(-4.0, 2) == OpenClosed(-4, 2)
 end
 
