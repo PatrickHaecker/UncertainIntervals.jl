@@ -24,18 +24,18 @@ end
     return OpenClosedInner{T}(left, right) # or at least efficiently handle this – but it can't with Julia 1.13, although this is the least inefficient
 end
 
-# TODO: Generate
-Base.tryparse(::Type{<:Greater{T}},      s::AbstractString) where T = s[1] == '>' ? tryparse(T, @view s[1+ncodeunits('>') : end]) |> Greater      : nothing
-Base.tryparse(::Type{<:GreaterEqual{T}}, s::AbstractString) where T = s[1] == '≥' ? tryparse(T, @view s[1+ncodeunits('≥') : end]) |> GreaterEqual : nothing
-Base.tryparse(::Type{<:Less{T}},         s::AbstractString) where T = s[1] == '<' ? tryparse(T, @view s[1+ncodeunits('<') : end]) |> Less         : nothing
-Base.tryparse(::Type{<:LessEqual{T}},    s::AbstractString) where T = s[1] == '≤' ? tryparse(T, @view s[1+ncodeunits('≤') : end]) |> LessEqual    : nothing
+for Cmp in Comparisons
+    c = Char(Cmp)
+    @eval @inline function Base.tryparse(::Type{<:$Cmp{T}}, str::AbstractString) where T
+        s = strip(str)
+        s[1] == $c ? tryparse(T, @view s[1 + ncodeunits($c):end]) |> $Cmp : nothing
+    end
+end
 
-function Base.tryparse(::Type{<:Comparison{T}}, str::AbstractString) where T
-    s = strip(str)
-    @∃⏎ tryparse(Greater{T}, s)
-    @∃⏎ tryparse(GreaterEqual{T}, s)
-    @∃⏎ tryparse(Less{T}, s)
-    tryparse(LessEqual{T}, s)
+function Base.tryparse(::Type{<:Comparison{T}}, s::AbstractString) where T
+    for C in Comparisons
+        @∃⏎ tryparse(C{T}, s)
+    end
 end
 
 function Base.tryparse(::Type{Inner{T}}, s::AbstractString) where T

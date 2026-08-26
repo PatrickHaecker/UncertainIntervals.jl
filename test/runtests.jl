@@ -53,6 +53,9 @@ end
     @test tryparse(Interval{Int32}, "(-∞, ∞)") == OpenOpen{Int32}(-∞, +∞)
 end
 
+@testset "Printing" begin
+    @test sprint(print, ClosedOpen(2.0, 5.0)) == "[2.0, 5.0)"
+end
 
 # Test macro functionality
 @testset "Macro Functionality" begin

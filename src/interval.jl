@@ -151,6 +151,7 @@ const GreaterEqual{T} = RightClosedRay{T}
 const Less{T} = LeftOpenRay{T}
 const LessEqual{T} = LeftClosedRay{T}
 const Comparison{T} = Union{Greater{T}, GreaterEqual{T}, Less{T}, LessEqual{T}}
+const Comparisons = (Greater, GreaterEqual, Less, LessEqual)
 
 
 const RegularInterval{T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness} = Interval{T,Oₗ,Oᵣ,T,T}
@@ -224,12 +225,14 @@ end
     return Interval{T, Oₗ, Oᵣ, typeof(left), typeof(right)}(left, right)
 end
 
-Base.print(io::IO, x::AInterval{Oₗ, Oᵣ}) where {Oₗ, Oᵣ} = print(io, Oₗ, x.left, ", ", x.right, Oᵣ)
-Base.print(io::IO, x::Greater) = print(io, ">", x.left)
-Base.print(io::IO, x::GreaterEqual) = print(io, "≥", x.left)
-Base.print(io::IO, x::Less) = print(io, "<", x.right)
-Base.print(io::IO, x::LessEqual) = print(io, "≤", x.right)
+for (T, c, field) in zip(Comparisons, ('>', '≥', '<', '≤'), (:left, :left, :right, :right))
+    @eval Base.Char(::Type{$T}) = $c
+    @eval Base.print(io::IO, x::$T) = print(io, $c, x.$field)
+    @eval Base.print(x::$T) = print(Base.stdout, x)
+end
 
+Base.print(io::IO, x::AInterval{T,Oₗ,Oᵣ}) where {T,Oₗ,Oᵣ} = print(io, Oₗ, x.left, ", ", x.right, Oᵣ)
+Base.print(x::AInterval{T,Oₗ,Oᵣ}) where {T,Oₗ,Oᵣ} = print(Base.stdout, x)
 Base.show(io::IO, ::MIME"text/plain", x::AInterval) = print(io, x)
 
 Base.eltype(::Type{<:Interval{T}}) where T = T
