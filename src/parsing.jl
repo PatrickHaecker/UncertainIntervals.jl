@@ -1,35 +1,3 @@
-function _tryparse(::Type{NegativeInfinity}, s::AbstractString) # TODO: Switch to upstreamed version when available
-    i = findfirst(!isspace, s)
-    s[i] == '-' || return nothing
-    i = findnext(!isspace, s, nextind(s, i)) # A space can have multiple codeunits
-    s[i] == '∞' || return nothing
-    return findnext(!isspace, s, i + ncodeunits('∞')) |> isnothing ? NegativeInfinity() : nothing
-end
-# @test _tryparse(NegativeInfinity, "-∞") == NegativeInfinity()
-# @test _tryparse(NegativeInfinity, " - ∞ ") == NegativeInfinity()
-# @test _tryparse(NegativeInfinity, "∞ ") |> isnothing
-# @test _tryparse(NegativeInfinity, "3-∞") |> isnothing
-# @test _tryparse(NegativeInfinity, "-+∞") |> isnothing
-# @test _tryparse(NegativeInfinity, "-∞2") |> isnothing
-
-function _tryparse(::Type{PositiveInfinity}, s::AbstractString) # TODO: Switch to upstreamed version when available
-    i = findfirst(!isspace, s)
-    if s[i] == '+'
-        i = findnext(!isspace, s, nextind(s, i)) # A space can have multiple codeunits
-    end
-    s[i] == '∞' || return nothing
-    return findnext(!isspace, s, i + ncodeunits('∞')) |> isnothing ? PositiveInfinity() : nothing
-end
-# @test _tryparse(PositiveInfinity, "+∞") == PositiveInfinity()
-# @test _tryparse(PositiveInfinity, " + ∞ ") == PositiveInfinity()
-# @test _tryparse(PositiveInfinity, "∞") == PositiveInfinity()
-# @test _tryparse(PositiveInfinity, " ∞ ") == PositiveInfinity()
-# @test _tryparse(PositiveInfinity, "-∞") |> isnothing
-# @test _tryparse(PositiveInfinity, "+-∞") |> isnothing
-# @test _tryparse(PositiveInfinity, "--∞") |> isnothing
-# @test _tryparse(PositiveInfinity, "-∞∞") |> isnothing
-
-
 function Base.tryparse(::Type{<:CertainInterval{T}}, str::AbstractString) where T
     # We want to do `match(r"([([])\s*([^,]+)\s*,\s*([^,]+)\s*([)\]])", s)`, but allocation-free
 
@@ -78,12 +46,12 @@ end
 
 function Base.tryparse(::Type{LeftInner{T}}, s::AbstractString) where T
     @∃⏎ tryparse(Inner{T}, s)
-    _tryparse(NegativeInfinity, s)
+    tryparse(NegativeInfinity, s)
 end
 
 function Base.tryparse(::Type{RightInner{T}}, s::AbstractString) where T
     @∃⏎ tryparse(Inner{T}, s)
-    _tryparse(PositiveInfinity, s)
+    tryparse(PositiveInfinity, s)
 end
 
 function Base.tryparse(::Type{<:Interval{T}}, str::AbstractString) where T
