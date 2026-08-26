@@ -15,7 +15,7 @@ end
 @testset "Advanced Interval Construction" begin
     @test ClosedOpen(4, +∞) isa Interval{Int64, Int64, PositiveInfinity, LeftClosed, RightOpen}
     @test OpenOpen{Int}(4, +∞) isa Interval{Int64, Int64, PositiveInfinity, LeftOpen, RightOpen}
-    @test LeftRight{Int, LeftOpen, RightClosed}(-4.0, 2) == OpenClosed(-4, 2)
+    @test Interval{Int, LeftOpen, RightClosed}(-4.0, 2) == OpenClosed(-4, 2)
 end
 
 @testset "Conversion" begin

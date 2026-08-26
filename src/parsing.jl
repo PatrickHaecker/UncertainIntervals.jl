@@ -102,9 +102,7 @@ function Base.tryparse(::Type{<:Interval{T}}, str::AbstractString) where T
     @∃ left = tryparse(LeftInner{T}, @view s[1 : prevind(s, comma_pos)]) # we can have anything before the comma, so `prevind` it is
     @∃ right = tryparse(RightInner{T}, @view s[comma_pos+1 : end]) # a comma is ASCII, so +1 works
 
-    # TODO: Change to `Interval`
-    return LeftRight{T, left_openness |> typeof, right_openness |> typeof}(left, right)
-    # return LeftRight{T, left_openness, right_openness}(left, right)
+    return Interval{T, left_openness, right_openness}(left, right)
 end
 
 macro i_str(str::String)
