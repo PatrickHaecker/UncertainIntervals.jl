@@ -200,10 +200,11 @@ const ClosedOpen{T} = Interval{T, LeftClosed, RightOpen}
     T = Tₗ == NegativeInfinity && Tᵣ == PositiveInfinity ? "Provide the element type by calling `Interval{T}(-∞, ∞)`" |> ArgumentError |> throw :
         Tₗ == NegativeInfinity ? Tᵣ :
         Tᵣ == PositiveInfinity ? Tₗ :
-        Tₗ == Tᵣ ? Tₗ :
-        "Incompatible element types `Tₗ`: $Tₗ, `Tᵣ`: $Tᵣ" |> ArgumentError |> throw
+        promote_type(Tₗ, Tᵣ)
 
-    return Interval{T,Oₗ,Oᵣ,L,R}(left, right)
+    T === Union{} && "Incompatible element types `Tₗ`: $Tₗ, `Tᵣ`: $Tᵣ" |> ArgumentError |> throw
+
+    return Interval{T, Oₗ, Oᵣ}(left, right)
 end
 
 @inline function Interval{T,Oₗ,Oᵣ}(left::_LeftInner, right::_RightInner) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness}
