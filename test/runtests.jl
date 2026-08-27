@@ -57,6 +57,34 @@ end
     @test sprint(print, ClosedOpen(2.0, 5.0)) == "[2.0, 5.0)"
 end
 
+@testset "Bottom" begin
+    # `Union{}` is a subtype of every `Openness`, so no type parameter bound can keep it out.
+    @test_throws ArgumentError Interval{Int, Union{}, RightOpen, Int, Int}(1, 2)
+    @test_throws ArgumentError Interval{Int, LeftOpen, Union{}, Int, Int}(1, 2)
+    @test_throws ArgumentError Interval{Int, Union{}, RightOpen}(1, 2)
+    @test_throws ArgumentError Interval{Union{}, Union{}}(1, 2)
+    @test_throws ArgumentError RightRay{Int, Union{}}(1)
+    @test_throws Exception Interval{Union{}, LeftOpen, RightOpen, Int, Int}(1, 2)
+
+    # The same bound admits the `Openness` unions themselves.
+    @test_throws ArgumentError Interval{Int, LeftOpenness, RightOpen, Int, Int}(1, 2)
+    @test_throws ArgumentError Interval{Int, LeftOpen, RightOpenness, Int, Int}(1, 2)
+    @test ClosedOpen(1, 2) isa Interval{Int, LeftClosed, RightOpen, Int, Int}
+
+    @test !(Union{} isa typeunion(Openness))
+    @test !(Openness isa typeunion(Openness))
+    @test LeftOpen isa typeunion(Openness)
+    @test !(Union{} isa typeunion(LeftOpenness; whole = true))
+    @test LeftOpenness isa typeunion(LeftOpenness; whole = true)
+
+    @test sprint(print, Union{}) == "Union{}"
+    @test sprint(print, LeftOpen) == "("
+    @test_throws Exception tryparse(Union{}, '(') # `Base.tryparse(::Type{Union{}}, slurp...)` catches this one
+    @test_throws Exception chars(Union{})
+    @test_throws Exception findfirst(Union{}, "[1,2)")
+    @test findfirst(RightOpenness, "[1,2)") == 5
+end
+
 # Test macro functionality
 @testset "Macro Functionality" begin
     @test !isnothing(@∃ 42)

@@ -1,3 +1,7 @@
+# `Base.uniontypes` allocates a mutable `Vector`, so the compiler proves neither `:consistent` nor `:terminates` and refuses to fold. The result is an interned type, so asserting it is sound.
+"The type objects of the members of the union `U`, so `Union{Type{Int}, Type{Float64}}` for `Union{Int, Float64}`, with `whole` adding the type object of `U` itself. Needed wherever `Type{<:U}` is too wide, as that also covers `Union{}` and every sub-union of `U`."
+Base.@assume_effects :foldable typeunion(U; whole::Bool = false) = whole ? Union{Core.Typeof(U), typeunion(U)} : Union{(U |> Base.uniontypes .|> Core.Typeof)...}
+
 struct LeftOpen end
 struct LeftClosed end
 struct RightOpen end
@@ -14,17 +18,17 @@ isclosed(x::LeftOpenness) = x == LeftClosed()
 isopen(x::RightOpenness) = x == RightOpen()
 isclosed(x::RightOpenness) = x == RightClosed()
 
-Base.tryparse(O::Type{<:Openness}, c::AbstractChar) = c == Char(O) ? O() : nothing
+Base.tryparse(O::typeunion(Openness), c::AbstractChar) = c == Char(O) ? O() : nothing
 Base.tryparse(::Type{LeftOpenness}, c::AbstractChar) = @∃⏎ tryparse(LeftOpen, c) tryparse(LeftClosed, c)
 Base.tryparse(::Type{RightOpenness}, c::AbstractChar) = @∃⏎ tryparse(RightOpen, c) tryparse(RightClosed, c)
 
-Base.print(io::IO, O::Type{<:Openness}) = print(io, O |> Char)
-Base.findfirst(O::Type{<:Openness}, s::AbstractString) = findfirst(O |> chars |> in, s)
+Base.print(io::IO, O::typeunion(Openness)) = print(io, O |> Char)
+Base.findfirst(O::Union{typeunion(LeftOpenness; whole = true), typeunion(RightOpenness; whole = true)}, s::AbstractString) = findfirst(O |> chars |> in, s)
 
 Base.Char(::Type{LeftOpen}) = '('
 Base.Char(::Type{LeftClosed}) = '['
 Base.Char(::Type{RightOpen}) = ')'
 Base.Char(::Type{RightClosed}) = ']'
 
-chars(::Type{<:LeftOpenness}) = (LeftOpen, LeftClosed) .|> Char
-chars(::Type{<:RightOpenness}) = (RightOpen, RightClosed) .|> Char
+chars(::typeunion(LeftOpenness; whole = true)) = (LeftOpen, LeftClosed) .|> Char
+chars(::typeunion(RightOpenness; whole = true)) = (RightOpen, RightClosed) .|> Char

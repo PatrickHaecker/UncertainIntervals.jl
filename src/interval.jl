@@ -114,6 +114,8 @@ struct Interval{T,Oₗ,Oᵣ,L,R} <: AInterval{T,Oₗ,Oᵣ,L,R}
 
     # At least with Julia 1.13 it is impossible to constraint the type parameters adequately. Therefore constraint at least the constructed objects.
     @inline function Interval{T,Oₗ,Oᵣ,L,R}(left::L, right::R) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner{T}, R <: _RightInner{T}}
+        # `Oₗ <: LeftOpenness` also admits `Union{}` and `LeftOpenness` itself.
+        Oₗ isa typeunion(LeftOpenness) && Oᵣ isa typeunion(RightOpenness) || "Each bound needs a single `Openness`, not a union of them" |> ArgumentError |> throw
         (L == NegativeInfinity && Oₗ == LeftClosed || R == PositiveInfinity && Oᵣ == RightClosed ) && "Infinite closed bound detected" |> ArgumentError |> throw
         T <: Interval && "Elements of an `Interval` shall not be `Interval`s" |> ArgumentError |> throw
         new{T, Oₗ, Oᵣ, L, R}(left, right)
