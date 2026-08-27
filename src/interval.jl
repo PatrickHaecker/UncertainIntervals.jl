@@ -132,14 +132,6 @@ const OpenInf{T} = RightOpenRay{T}
 const OpenSup{T} = LeftOpenRay{T}
 const ClosedInf{T} = RightClosedRay{T}
 const ClosedSup{T} = LeftClosedRay{T}
-# This does not contain the extremum, i.e. minimum or maximum, for an open bound, but the infimum or supremum, so don't define it as such.
-# const Extremum{T} = Union{OpenMin{T}, OpenMax{T}, ClosedMin{T}, ClosedMax{T}}
-
-# const Greater{T} = RightOpenRay{T}
-# const Superior{T} = LeftOpenRay{T}
-# const Less{T} = RightClosedRay{T}
-# const Inferior{T} = LeftClosedRay{T}
-# const Comparison{T} = Union{Greater{T}, Superior{T}, Less{T}, Inferior{T}}
 
 const LessThan{T} = LeftOpenRay{T}
 const AtMost{T} = LeftClosedRay{T}
@@ -161,10 +153,10 @@ const OpenClosedRegular{T} = RegularInterval{T, LeftOpen, RightClosed}
 const ClosedOpenRegular{T} = RegularInterval{T, LeftClosed, RightOpen}
 const CertainInterval{T} = Union{OpenRegular{T}, ClosedRegular{T}, OpenClosedRegular{T}, ClosedOpenRegular{T}}
 
-const OpenInfOpenSup{T} = OpenRegular{T}
-const ClosedInfClosedSup{T} = ClosedRegular{T}
-const OpenInfClosedSup{T} = OpenClosedRegular{T}
-const ClosedInfOpenSup{T} = ClosedOpenRegular{T}
+# const OpenInfOpenSup{T} = OpenRegular{T}
+# const ClosedInfClosedSup{T} = ClosedRegular{T}
+# const OpenInfClosedSup{T} = OpenClosedRegular{T}
+# const ClosedInfOpenSup{T} = ClosedOpenRegular{T}
 
 const InnerInterval{T} = Union{CertainRay{T}, CertainInterval{T}}
 # The uncertainty can only be expressed with values within a *certain* range to avoid infinite recursion. So it is no contradiction at all to define the `Uncertainty` with a certain value, a certain ray or a certain interval, but instead it is an absolute necessity.
@@ -184,18 +176,18 @@ const ClosedClosed{T} = Interval{T, LeftClosed, RightClosed}
 const OpenClosed{T} = Interval{T, LeftOpen, RightClosed}
 const ClosedOpen{T} = Interval{T, LeftClosed, RightOpen}
 
-@inline Greater(left::T) where T = RightRay{T, LeftOpen}(left, +∞)
-@inline GreaterEqual(left::T) where T = RightRay{T, LeftClosed}(left, +∞)
-@inline Less(right::T) where T = LeftRay{T, RightOpen}(-∞, right)
-@inline LessEqual(right::T) where T = LeftRay{T, RightClosed}(-∞, right)
+# Deliberately accept a bit more combinations, as the inner constructor implements the right constraint and we do not need to do it multiple times.
+@inline Interval{T,Oₗ,Oᵣ,L,R}(inner) where {T,Oₗ,Oᵣ,L,R} =
+    L == NegativeInfinity ? Interval{T, Oₗ, Oᵣ, NegativeInfinity, T}(-∞, convert_inner(T, inner)) :
+    R == PositiveInfinity ? Interval{T, Oₗ, Oᵣ, T, PositiveInfinity}(convert_inner(T, inner), +∞) :
+    "The types of the left and right bound need to be either `NegativeInfinity` or `PositiveInfinity`, respectively, to use this constructor" |> ArgumentError |> throw
+# @inline (Interval{T, Oₗ, Oᵣ, L, R} where T)(inner) where {Oₗ,Oᵣ,L,R} = Interval{typeof(inner), Oₗ, Oᵣ, L, R}(inner)
+for C in (:Greater, :GreaterEqual, :Less, :LessEqual)
+    @eval @inline $C(x) = $C{typeof(x)}(x)
+end
 
-@inline OpenOpen(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval{LeftOpen, RightOpen}(left, right)
-@inline ClosedClosed(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval{LeftClosed, RightClosed}(left, right)
-@inline OpenClosed(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval{LeftOpen, RightClosed}(left, right)
-@inline ClosedOpen(left::_LeftInner{T}, right::_RightInner{T}) where T = Interval{LeftClosed, RightOpen}(left, right)
-
-# We could add a constructor which accept `(left::T, right::T) where T`, but this is already as efficient as it gets (only one method, everything statically evaluatable).
-@inline function Interval{Oₗ, Oᵣ}(left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner, R <: _RightInner}
+# We could add a constructor which accept `(left::T, right::T) where T`, but this is already as efficient as it gets (only one method, everything statically evaluated).
+@inline function Interval{Oₗ,Oᵣ}(left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner, R <: _RightInner}
     Tₗ = L <: InnerInterval ? eltype(L) : L
     Tᵣ = R <: InnerInterval ? eltype(R) : R
     T = Tₗ == NegativeInfinity && Tᵣ == PositiveInfinity ? "Provide the element type by calling `Interval{T}(-∞, ∞)`" |> ArgumentError |> throw :
@@ -205,14 +197,15 @@ const ClosedOpen{T} = Interval{T, LeftClosed, RightOpen}
 
     T === Union{} && "Incompatible element types `Tₗ`: $Tₗ, `Tᵣ`: $Tᵣ" |> ArgumentError |> throw
 
-    return Interval{T, Oₗ, Oᵣ}(left, right)
+    return Interval{T,Oₗ,Oᵣ}(left, right)
 end
+# Handle the `OpenOpen(x, y)` calls and the like. We wouldn't need this constructor if we defined `OpenOpen` and the like without `T`, but that wouldn't allow the user to define a simple conversion as in `OpenOpen{Int}(1, 4/2)` without defining at least one additional constructor for this, so that would not be a win.
+@inline Interval{<:Any, Oₗ, Oᵣ}(left::_LeftInner, right::_RightInner) where {Oₗ,Oᵣ} = Interval{Oₗ,Oᵣ}(left, right)
 
 @inline function Interval{T,Oₗ,Oᵣ}(left::_LeftInner, right::_RightInner) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness}
     l, r = convert_inner(T, left), convert_inner(T, right)
     Interval{T, Oₗ, Oᵣ, typeof(l), typeof(r)}(l, r)
 end
-@inline Interval{T,oₗ,oᵣ}(l::_LeftInner, r::_RightInner) where {T, oₗ, oᵣ} = Interval{T, typeof(oₗ), typeof(oᵣ)}(l, r)
 
 
 @inline convert_inner(::Type, x::Union{NegativeInfinity, PositiveInfinity}) = x
@@ -244,94 +237,3 @@ Base.eltype(::Type{<:Interval{T}}) where T = T
 
 # 2 …⁽ 4
 # 2 …₍ 4
-
-
-
-# The aliases for the different combinations use the naming scheme: `Left`[`Uncertainty`]`Right`[`Uncertainty`][`Openness`][`Openness`]`Interval`
-# with the additional rules
-# - `Openness` is used only once, if both `Openness` values are identical for the interval, so we have {Open, Closed, OpenClosed, ClosedOpen}.
-# - `Uncertainty` uses the following values {, OpenInf, OpenSup, ClosedInf, ClosedSup, OpenInfSup, ClosedInfSup, OpenInfClosedSup, ClosedInfOpenSup, } plus either `NegativeInfinity` or `PositiveInfinity`.
-# - `Uncertainty` is used only once, if both `Uncertainty` values are identical for the interval. In this case `Left` and `Right` is omitted.
-# - `Left` or `Right` is omitted if the corresponding bound is not uncertain, i.e. uses `T`.
-# - `Uncertainty` and `Openness` is omitted and `Interval` is changed into `Ray`, if the corresponding uncertainty is infinite. This matches the terms used in http://www.mathmatique.com/naive-set-theory/relations/intervals
-# This leads to the following number of combinations per T: (2 * (1 + 4 + 4))^2 + 2 * (9 * 2) = (2 * 9)^2 + 2 * 18 = 18^2 + 36 = 324 + 36 = 360
-
-
-# const LeftClosedInfOpenSupRightOpenInfClosedSupOpenClosedInterval{T} = Interval{T, ClosedOpen, OpenClosed, Open, Closed}
-# const LeftClosedOpenRightOpenClosedIntervalOpenClosed{T} = Interval{T, ClosedOpen, OpenClosed, Open, Closed}
-# const OpenClosedIntervalClosedOpenLeftOpenClosedRight{T} = Interval{T, ClosedOpen, OpenClosed, Open, Closed}
-# const ClosedOpenLeftOpenClosedRightOpenClosedInterval{T} = Interval{T, ClosedOpen, OpenClosed, Open, Closed}
-# const ClosedOpenLeft_OpenClosedRight_OpenClosedInterval{T} = Interval{T, ClosedOpen, OpenClosed, LeftOpen, RightClosed}
-
-# const RightOpenMinRay{T}   = Interval{Open, Open, OpenMin{T}, PositiveInfinity, T}
-# const RightOpenMaxRay{T}   = Interval{Open, Open, OpenMax{T}, PositiveInfinity, T}
-# const LeftOpenMinRay{T}    = Interval{Open, Open, NegativeInfinity, OpenMin{T}, T}
-# const LeftOpenMaxRay{T}    = Interval{Open, Open, NegativeInfinity, OpenMax{T}, T}
-
-# const RightClosedMinRay{T} = Interval{Closed, Open, ClosedMin{T}, PositiveInfinity, T}
-# const RightClosedMaxRay{T} = Interval{Closed, Open, ClosedMax{T}, PositiveInfinity, T}
-# const LeftClosedMinRay{T}  = Interval{Open, Closed, NegativeInfinity, ClosedMin{T}, T}
-# const LeftClosedMaxRay{T}  = Interval{Open, Closed, NegativeInfinity, ClosedMax{T}, T}
-
-
-
-
-# const OpenMinInterval{T} = Interval{Open, Open, OpenMin{T}, OpenMin{T}, T}
-# const OpenMaxInterval{T} = Interval{Open, Open, OpenMax{T}, OpenMax{T}, T}
-# const ClosedMinInterval{T} = Interval{Closed, Closed, ClosedMin{T}, ClosedMin{T}, T}
-# const ClosedMaxInterval{T} = Interval{Closed, Closed, ClosedMax{T}, ClosedMax{T}, T}
-
-
-# const OpenRightMinInterval{T} = Interval{Open, Open, OpenBound, OpenMinBound, T}
-# const OpenRightMaxInterval{T} = Interval{Open, Open, OpenBound, OpenMaxBound, T}
-# const OpenLeftMinInterval{T} = Interval{Open, Open, OpenMinBound, OpenBound, T}
-# const OpenLeftMinRightMaxInterval{T} = Interval{Open, Open, OpenMinBound, OpenMaxBound, T}
-# const OpenLeftMaxInterval{T} = Interval{Open, Open, OpenMaxBound, OpenBound, T}
-# const OpenLeftMaxRightMinInterval{T} = Interval{Open, Open, OpenMaxBound, OpenMinBound, T}
-
-# const ClosedRightMinInterval{T} = Interval{ClosedBound, ClosedMinBound, T}
-# const ClosedRightMaxInterval{T} = Interval{ClosedBound, ClosedMaxBound, T}
-# const ClosedLeftMinInterval{T} = Interval{ClosedMinBound, ClosedBound, T}
-# const ClosedLeftMinRightMaxInterval{T} = Interval{ClosedMinBound, ClosedMaxBound, T}
-# const ClosedLeftMaxInterval{T} = Interval{ClosedMaxBound, ClosedBound, T}
-# const ClosedLeftMaxRightMinInterval{T} = Interval{ClosedMaxBound, ClosedMinBound, T}
-
-#= Alternative:
-
-
-
-
-# const OpenRightMinInterval{T} = Interval{OpenBound, OpenMinBound, T, T, T}
-
-# const RightOpenRay{T} = Interval{OpenBound, OpenBound, NegativeInfinity, T, T}
-
-# const LeftOpenMinMaxRightClosedMinMaxInterval{T} = Interval{OpenBound, ClosedBound, OpenInterval{T}, ClosedInterval{T}, T}
-# =#
-
-# Both sides identical: [Openness][Determination]Interval
-# Same Openness, different Determination: [Openness]Left[LeftDetermination]Right[RightDetermination]Interval
-
-
-
-# Same Determination, different Openness: Left[LeftOpenness]Right[RightOpenness][Determination]Interval
-# const LeftOpenRightClosedInterval{T} = Interval{OpenBound, ClosedBound, T}
-# const LeftClosedRightOpenInterval{T} = Interval{ClosedBound, OpenBound, T}
-# const MinLeftOpenRightClosedInterval{T} = Interval{OpenMinBound, ClosedMinBound, T}
-# const MinLeftClosedRightOpenInterval{T} = Interval{ClosedMinBound, OpenMinBound, T}
-# const MaxLeftOpenRightClosedInterval{T} = Interval{OpenMaxBound, ClosedMaxBound, T}
-# const MaxLeftClosedRightOpenInterval{T} = Interval{ClosedMaxBound, OpenMaxBound, T}
-
-# All different: Left[LeftDetermination][LeftOpenness]Right[RightDetermination][RightOpenness]Interval
-# const LeftOpenRightClosedMinInterval{T} = Interval{OpenBound, ClosedMinBound, T}
-# const LeftOpenRightClosedMaxInterval{T} = Interval{OpenBound, ClosedMaxBound, T}
-# const LeftOpenMinRightClosedInterval{T} = Interval{OpenMinBound, ClosedBound, T}
-# const LeftOpenMinRightClosedMaxInterval{T} = Interval{OpenMinBound, ClosedMaxBound, T}
-# const LeftOpenMaxRightClosedInterval{T} = Interval{OpenMaxBound, ClosedBound, T}
-# const LeftOpenMaxRightClosedMinInterval{T} = Interval{OpenMaxBound, ClosedMinBound, T}
-
-# const LeftClosedRightOpenMinInterval{T} = Interval{ClosedBound, OpenMinBound, T}
-# const LeftClosedRightOpenMaxInterval{T} = Interval{ClosedBound, OpenMaxBound, T}
-# const LeftClosedMinRightOpenInterval{T} = Interval{ClosedMinBound, OpenBound, T}
-# const LeftClosedMinRightOpenMaxInterval{T} = Interval{ClosedMinBound, OpenMaxBound, T}
-# const LeftClosedMaxRightOpenInterval{T} = Interval{ClosedMaxBound, OpenBound, T}
-# const LeftClosedMaxRightOpenMinInterval{T} = Interval{ClosedMaxBound, OpenMinBound, T}
