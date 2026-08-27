@@ -144,7 +144,7 @@ const Greater{T} = RightOpenRay{T}
 const GreaterEqual{T} = RightClosedRay{T}
 const Less{T} = LeftOpenRay{T}
 const LessEqual{T} = LeftClosedRay{T}
-const Comparison{T} = Union{Greater{T}, GreaterEqual{T}, Less{T}, LessEqual{T}}
+const Comparison{T} = CertainRay{T}
 const Comparisons = (Greater, GreaterEqual, Less, LessEqual)
 
 
@@ -183,10 +183,8 @@ const ClosedOpen{T} = Interval{T, LeftClosed, RightOpen}
     L == NegativeInfinity ? Interval{T, Oₗ, Oᵣ, NegativeInfinity, T}(-∞, convert_inner(T, inner)) :
     R == PositiveInfinity ? Interval{T, Oₗ, Oᵣ, T, PositiveInfinity}(convert_inner(T, inner), +∞) :
     "The types of the left and right bound need to be either `NegativeInfinity` or `PositiveInfinity`, respectively, to use this constructor" |> ArgumentError |> throw
-# @inline (Interval{T, Oₗ, Oᵣ, L, R} where T)(inner) where {Oₗ,Oᵣ,L,R} = Interval{typeof(inner), Oₗ, Oᵣ, L, R}(inner)
-for C in (:Greater, :GreaterEqual, :Less, :LessEqual)
-    @eval @inline $C(x) = $C{typeof(x)}(x)
-end
+# A `Type{C} where C <: Comparison` bound would also capture the concrete `Greater{Int}`, which has to reach the constructor above.
+@inline (C::typeunion(Comparison))(x) = C{typeof(x)}(x)
 
 # We could add a constructor which accept `(left::T, right::T) where T`, but this is already as efficient as it gets (only one method, everything statically evaluated).
 @inline function Interval{Oₗ,Oᵣ}(left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner, R <: _RightInner}

@@ -1,6 +1,10 @@
+# `Base.uniontypes` stops at an outer `where`, so strip all of them and put them back on each member.
+unionmembers(U) = Base.uniontypes(U)
+unionmembers(U::UnionAll) = U |> Base.unwrap_unionall |> Base.uniontypes .|> Base.Fix2(Base.rewrap_unionall, U)
+
 # `Base.uniontypes` allocates a mutable `Vector`, so the compiler proves neither `:consistent` nor `:terminates` and refuses to fold. The result is an interned type, so asserting it is sound.
 "The type objects of the members of the union `U`, so `Union{Type{Int}, Type{Float64}}` for `Union{Int, Float64}`, with `whole` adding the type object of `U` itself. Needed wherever `Type{<:U}` is too wide, as that also covers `Union{}` and every sub-union of `U`."
-Base.@assume_effects :foldable typeunion(U; whole::Bool = false) = whole ? Union{Core.Typeof(U), typeunion(U)} : Union{(U |> Base.uniontypes .|> Core.Typeof)...}
+Base.@assume_effects :foldable typeunion(U; whole::Bool = false) = whole ? Union{Core.Typeof(U), typeunion(U)} : Union{(U |> unionmembers .|> Core.Typeof)...}
 
 struct LeftOpen end
 struct LeftClosed end
