@@ -9,7 +9,7 @@
 """
     @∃ regular exceptional=nothing
 
-Ensure a `regular` value exists (being not `nothing`) and evalute to its value. Otherwise exit the enclosing function returning `exceptional`.
+Ensure a `regular` value exists (being not `nothing`) and evaluate to its value. Otherwise exit the enclosing function returning `exceptional`.
 
 `exceptional` is `nothing` by default, but it can be a subtype of Exception, too, or any other value.
 
@@ -20,35 +20,68 @@ macro ∃(regular, exceptional=nothing) # non-nothing continues; nothing returns
     :(temp = $(regular |> esc); isnothing(temp) ? (return $(exceptional |> esc)) : temp)
 end
 
-"nothing continues; non-nothing returns exceptional"
+"""
+    @∄ regular exceptional=nothing
+
+Ensure a `regular` value does not exist (being `nothing`) and evaluate to `nothing`. Otherwise exit the enclosing function returning `exceptional`.
+"""
 macro ∄(regular, exceptional=nothing)
     :($(regular |> esc) |> isnothing ? nothing : (return $(exceptional |> esc)))
 end
 
-"non-nothing returns its value; nothing continues as exceptional"
+"""
+    @∃⏎ regular exceptional=nothing
+
+Exit the enclosing function returning the `regular` value if it exists (being not `nothing`). Otherwise evaluate to `exceptional` and continue.
+"""
 macro ∃⏎(regular, exceptional=nothing)
     :(temp = $(regular |> esc); isnothing(temp) ? $(exceptional |> esc) : return temp)
 end
 
-"nothing returns its value; non-nothing continues as exceptional"
+"""
+    @∄⏎ regular exceptional=nothing
+
+Exit the enclosing function returning `nothing` if the `regular` value does not exist. Otherwise evaluate to `exceptional` and continue.
+"""
 macro ∄⏎(regular, exceptional=nothing)
     :($(regular |> esc) |> isnothing ? (return nothing) : $(exceptional |> esc))
 end
 
 
-"[See also](https://en.wikipedia.org/wiki/Truth_value)"
+"""
+    @⊤ condition exceptional=nothing
+
+Ensure `condition` holds and evaluate to `true`. Otherwise exit the enclosing function returning `exceptional`.
+
+[See also](https://en.wikipedia.org/wiki/Truth_value)
+"""
 macro ⊤(condition, exceptional=nothing)
     :($(condition |> esc) ? true : (return $(exceptional |> esc)))
 end
 
+"""
+    @⊥ condition exceptional=nothing
+
+Ensure `condition` fails and evaluate to `false`. Otherwise exit the enclosing function returning `exceptional`.
+"""
 macro ⊥(condition, exceptional=nothing)
     :($(condition |> esc) ? (return $(exceptional |> esc)) : false)
 end
 
+"""
+    @⊤⏎ condition exceptional=nothing
+
+Exit the enclosing function returning `true` if `condition` holds. Otherwise evaluate to `exceptional` and continue.
+"""
 macro ⊤⏎(condition, exceptional=nothing)
     :($(condition |> esc) ? (return true) : $(exceptional |> esc))
 end
 
+"""
+    @⊥⏎ condition exceptional=nothing
+
+Exit the enclosing function returning `false` if `condition` fails. Otherwise evaluate to `exceptional` and continue.
+"""
 macro ⊥⏎(condition, exceptional=nothing)
     :($(condition |> esc) ? $(exceptional |> esc) : (return false))
 end
