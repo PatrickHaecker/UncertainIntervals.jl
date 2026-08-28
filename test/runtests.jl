@@ -16,6 +16,8 @@ end
     @test ClosedOpen(4, +∞) isa Interval{Int64, LeftClosed, RightOpen, Int64, PositiveInfinity}
     @test OpenOpen{Int}(4, +∞) isa Interval{Int64, LeftOpen, RightOpen, Int64, PositiveInfinity}
     @test Interval{Int, LeftOpen, RightClosed}(-4.0, 2) == OpenClosed(-4, 2)
+    @test Line{Int}() == OpenOpen{Int}(-∞, +∞)
+    @test sprint(print, Line{Float64}()) == "(-∞, +∞)"
 end
 
 @testset "Conversion" begin

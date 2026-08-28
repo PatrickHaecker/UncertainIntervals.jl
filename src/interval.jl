@@ -130,6 +130,9 @@ const RightClosedRay{T} = RightRay{T, LeftClosed}
 const LeftClosedRay{T} = LeftRay{T, RightClosed}
 const CertainRay{T} = Union{RightOpenRay{T}, LeftOpenRay{T}, RightClosedRay{T}, LeftClosedRay{T}}
 
+const Line{T} = Interval{T, LeftOpen, RightOpen, NegativeInfinity, PositiveInfinity}
+Line{T}() where T = Line{T}(-∞, +∞)
+
 const OpenInf{T} = RightOpenRay{T}
 const OpenSup{T} = LeftOpenRay{T}
 const ClosedInf{T} = RightClosedRay{T}
@@ -190,7 +193,7 @@ const ClosedOpen{T} = Interval{T, LeftClosed, RightOpen}
 @inline function Interval{Oₗ,Oᵣ}(left::L, right::R) where {Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner, R <: _RightInner}
     Tₗ = L <: InnerInterval ? eltype(L) : L
     Tᵣ = R <: InnerInterval ? eltype(R) : R
-    T = Tₗ == NegativeInfinity && Tᵣ == PositiveInfinity ? "Provide the element type by calling `Interval{T}(-∞, ∞)`" |> ArgumentError |> throw :
+    T = Tₗ == NegativeInfinity && Tᵣ == PositiveInfinity ? "Provide the element type by calling `Line{T}()`" |> ArgumentError |> throw :
         Tₗ == NegativeInfinity ? Tᵣ :
         Tᵣ == PositiveInfinity ? Tₗ :
         promote_type(Tₗ, Tᵣ)
