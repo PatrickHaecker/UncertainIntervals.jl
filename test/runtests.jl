@@ -37,12 +37,38 @@ end
     @test tryparse(CertainInterval{Int}, "[  1  ,  2  ]") == ClosedClosed(1, 2)
     @test tryparse(CertainInterval{Int}, "  [  1  ,  2  ]  ") == ClosedClosed(1, 2)
 end
+@testset "Parse Certain Intervals with a fixed openness" begin
+    # `===` also pins the type down to the one asked for.
+    @test tryparse(OpenOpenInner{Int}, "(1, 2)") === OpenOpen(1, 2)
+    @test tryparse(OpenClosedInner{Int}, "(1, 2]") === OpenClosed(1, 2)
+    @test tryparse(ClosedOpenInner{Int}, "[1, 2)") === ClosedOpen(1, 2)
+    @test tryparse(ClosedClosedInner{Int}, "[1, 2]") === ClosedClosed(1, 2)
 
+    # Any other openness is a parse failure rather than a differently typed interval.
+    @test isnothing(tryparse(OpenOpenInner{Int}, "[1, 2)"))
+    @test isnothing(tryparse(OpenOpenInner{Int}, "(1, 2]"))
+    @test isnothing(tryparse(OpenOpenInner{Int}, "[1, 2]"))
+    @test isnothing(tryparse(ClosedClosedInner{Int}, "(1, 2)"))
+    @test isnothing(tryparse(ClosedOpenInner{Int}, "(1, 2]"))
+    @test isnothing(tryparse(OpenClosedInner{Int}, "[1, 2)"))
+
+    @test isnothing(tryparse(ClosedOpenInner{Int}, "no interval"))
+    @test isnothing(tryparse(ClosedOpenInner{Int}, "[x, 2)"))
+end
 @testset "Parse Rays" begin
     @test tryparse(Interval{Int}, ">4") == Greater(4)
     @test tryparse(Interval{Int}, " < 5 ") == Less(5)
     @test tryparse(Interval{Int}, "≥12") == GreaterEqual(12)
     @test tryparse(Interval{Float64}, "≤2.5") == LessEqual(2.5)
+
+    @test tryparse(Interval{Int}, ">=12") == GreaterEqual(12)
+    @test tryparse(Interval{Float64}, "<=2.5") == LessEqual(2.5)
+    @test tryparse(Interval{Int}, "  >= 4 ") == GreaterEqual(4)
+
+    # A bound which does not parse must fail the whole ray, not become its element.
+    @test isnothing(tryparse(Interval{Int}, "<x"))
+    @test isnothing(tryparse(Interval{Int}, ">=x"))
+    @test isnothing(tryparse(Interval{Int}, ">"))
 end
 
 @testset "Parse Uncertain Intervals" begin
@@ -57,6 +83,38 @@ end
 
 @testset "Printing" begin
     @test sprint(print, ClosedOpen(2.0, 5.0)) == "[2.0, 5.0)"
+end
+
+@testset "Interval Literals" begin
+    a, b = 3, 7
+    @test i"[1, 2)" == ClosedOpen(1, 2)
+    @test i"(1.5, 2.5]" == OpenClosed(1.5, 2.5)
+    @test i"  [ 1 , 2 ]  " == ClosedClosed(1, 2)
+    @test i">4" == Greater(4)
+    @test i"≥12" == GreaterEqual(12)
+    @test i"<5" == Less(5)
+    @test i"≤2.5" == LessEqual(2.5)
+    @test i">=12" == GreaterEqual(12)
+    @test i"<=2.5" == LessEqual(2.5)
+    @test i"[2, >=4]" == ClosedClosed(2, GreaterEqual(4))
+
+    @test i"[a, b)" == ClosedOpen(3, 7)
+    @test i"[a + b, 2b]" == ClosedClosed(10, 14)
+    @test i"[max(1, 2), 5)" == ClosedOpen(2, 5) # the comma of a call must not split the interval
+
+    @test i"[2, >4]" == ClosedClosed(2, Greater(4))
+    @test i"(≥2.0, 5.2)" == OpenOpen(GreaterEqual(2.0), 5.2)
+    @test i"([-3.4, -2.87], ≥-1.4]" == OpenClosed(ClosedClosed(-3.4, -2.87), GreaterEqual(-1.4))
+    @test i"[[1, 2], [3, 4]]" == ClosedClosed(ClosedClosed(1, 2), ClosedClosed(3, 4))
+
+    @test i"[4, +∞)" == GreaterEqual(4)
+    @test i"[4, ∞)" == GreaterEqual(4) # a bare `∞` is the positive one
+    @test i"(-∞, 5]" == LessEqual(5)
+    @test_throws ArgumentError i"(-∞, +∞)" # no bound carries the element type, so `Line{T}()` it is
+
+    for x in (ClosedOpen(1, 4), Greater(4), LessEqual(2.5), ClosedClosed(2, OpenOpen(4, +∞)))
+        @test eval(UncertainIntervals.interval_expr(sprint(print, x))) == x
+    end
 end
 
 @testset "Bottom" begin

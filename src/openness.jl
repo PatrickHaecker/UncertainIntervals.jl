@@ -6,7 +6,7 @@ unionmembers(U::UnionAll) = U |> Base.unwrap_unionall |> Base.uniontypes .|> Bas
 """
     typeunion(U; whole::Bool = false)
 
-The type objects of the members of the union `U`, so `Union{Type{Int}, Type{Float64}}` for `Union{Int, Float64}`, with `whole` adding the type object of `U` itself. Needed wherever `Type{<:U}` is too wide, as that also covers `Union{}` and every sub-union of `U`.
+Return the type objects of the members of the union `U`, so `Union{Type{Int}, Type{Float64}}` for `Union{Int, Float64}`, with `whole` adding the type object of `U` itself. Needed wherever `Type{<:U}` is too wide, as that also covers `Union{}` and every sub-union of `U`.
 """
 Base.@assume_effects :foldable typeunion(U; whole::Bool = false) = whole ? Union{Core.Typeof(U), typeunion(U)} : Union{(U |> unionmembers .|> Core.Typeof)...}
 

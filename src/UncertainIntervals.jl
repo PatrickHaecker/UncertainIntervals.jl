@@ -1,6 +1,6 @@
 module UncertainIntervals
 
-using Infinities: NegativeInfinity, PositiveInfinity, ∞
+using Infinities: NegativeInfinity, PositiveInfinity, RealInfinity, ∞
 
 include("exceptional.jl")
 include("openness.jl")
