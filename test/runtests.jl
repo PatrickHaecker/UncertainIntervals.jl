@@ -85,6 +85,55 @@ end
     @test sprint(print, ClosedOpen(2.0, 5.0)) == "[2.0, 5.0)"
 end
 
+@testset "Emptiness" begin
+    @test isempty(i"[5, 3]")
+    @test !isempty(i"[3, 5]")
+    @test !isempty(i"[5, 5]")
+    @test isempty(i"(5, 5)")
+    @test isempty(i"[5, 5)")
+    @test isempty(i"(5, 5]")
+    @test !isempty(i">4")
+    @test !isempty(i"≤2.5")
+    @test !isempty(Line{Int}())
+
+    # An uncertain bound can still decide it.
+    @test isempty(i"[(3, 5), 1]")
+    @test !isempty(i"[(1, 3), 5]")
+    @test isempty(i"[(1, 3), 1]")
+    @test isempty(i"([1, 3], 1)")
+
+    @test ismissing(isempty(i"[(1.0, 3.0), 2.0]"))
+    @test ismissing(isempty(i"[[1, 3], 1]"))
+    @test ismissing(isempty(i"[≤9, 5]"))
+
+    # A discrete `T` turns every open bound into the closed one a step further in.
+    @test isempty(i"(1, 2)")
+    @test !isempty(i"(1.0, 2.0)")
+    @test !isempty(i"(1, 3)")
+    @test !isempty(i"[(1, 3), 2]")
+    @test isempty(i"((0, 2), 2)")
+
+    # A bound open at an extreme demands a value the type cannot hold.
+    @test isempty(i"(typemax(Int), typemax(Int))")
+    @test isempty(i"(typemax(Int), typemax(Int)]")
+    @test isempty(i"[typemin(Int), typemin(Int))")
+    @test !isempty(i"[typemax(Int), typemax(Int)]")
+    @test !isempty(i"(typemax(Int) - 1, typemax(Int)]")
+    @test isempty(i"(true, true)")
+    @test isempty(i"(big(1), big(2))")
+    @test !isempty(i"(big(1), big(3))")
+
+    # A bound no value compares with admits none of them.
+    @test isempty(i"(NaN, 1.0)")
+    @test isempty(i"[1.0, NaN]")
+    @test isempty(i"[NaN, NaN]")
+
+    # Certain bounds decide, so a `Bool` reaches the caller and stays usable as a condition.
+    @test (@inferred isempty(i"[5, 3]")) === true
+    @test (@inferred isempty(i">4")) === false
+    @test (@inferred isempty(Line{Int}())) === false
+end
+
 @testset "Interval Literals" begin
     a, b = 3, 7
     @test i"[1, 2)" == ClosedOpen(1, 2)

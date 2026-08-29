@@ -210,6 +210,24 @@ end
     Interval{T, Oₗ, Oᵣ, typeof(l), typeof(r)}(l, r)
 end
 
+"""
+    limits(x)
+
+Return the limits of the values a bound can take, each with its openness: the lower one as `l`, its openness as `₍`, the upper one as `r`, its openness as `₎`. A bound with no uncertainty is the degenerate closed interval on its own value.
+"""
+@inline limits(x) = (l = x, ₍ = LeftClosed(), r = x, ₎ = RightClosed())
+@inline limits(x::AInterval{T,Oₗ,Oᵣ}) where {T,Oₗ,Oᵣ} = (l = x.left, ₍ = Oₗ(), r = x.right, ₎ = Oᵣ())
+
+# `l` and `r` reach a bound as an interval in its own right, so the same four names describe an endpoint at either depth.
+@inline function Base.getproperty(x::AInterval{T,Oₗ,Oᵣ}, s::Symbol) where {T,Oₗ,Oᵣ}
+    s === :l && return limits(getfield(x, :left))
+    s === :r && return limits(getfield(x, :right))
+    s === :₍ && return Oₗ()
+    s === :₎ && return Oᵣ()
+    return getfield(x, s)
+end
+Base.propertynames(x::AInterval) = (fieldnames(typeof(x))..., :l, :r, :₍, :₎)
+
 
 @inline convert_inner(::Type, x::Union{NegativeInfinity, PositiveInfinity}) = x
 @inline convert_inner(::Type{T}, x::InnerInterval) where T = convert(Interval{T}, x)
@@ -232,6 +250,73 @@ Base.print(x::AInterval{T,Oₗ,Oᵣ}) where {T,Oₗ,Oᵣ} = print(Base.stdout, x
 Base.show(io::IO, ::MIME"text/plain", x::AInterval) = print(io, x)
 
 Base.eltype(::Type{<:Interval{T}}) where T = T
+
+"""
+    isdiscrete(T::Type)
+
+Determine whether the values of `T` have neighbors, so that every open bound equals the closed one a step further in.
+"""
+isdiscrete(::Type) = false
+isdiscrete(::Type{<:Integer}) = true
+
+"""
+    nextvalue(x)
+
+Return the neighbor above `x`, or `nothing` where the type ends. Only a discrete interval steps its bounds, so a dense one's values have no method here.
+"""
+nextvalue(x::Integer) = Base.hastypemax(typeof(x)) && x == typemax(x) ? nothing : x + oneunit(x)
+# An infinite bound is its own neighbor, as it already lies beyond every value.
+nextvalue(x::NegativeInfinity) = x
+
+"""
+    prevvalue(x)
+
+Return the neighbor below `x`, mirroring [`nextvalue`](@ref).
+"""
+prevvalue(x::Integer) = Base.hastypemax(typeof(x)) && x == typemin(x) ? nothing : x - oneunit(x)
+prevvalue(x::PositiveInfinity) = x
+
+"""
+    inwards(v, o::Openness)
+    inwards(v, o::Openness, p::Openness)
+
+Move the limit `v` one value inwards for each openness that excludes it, upwards for a left openness and downwards for a right one. Return `nothing` where the type ends.
+"""
+@inline inwards(v, ::LeftOpen) = nextvalue(v)
+@inline inwards(v, ::RightOpen) = prevvalue(v)
+@inline inwards(v, ::Closed) = v
+@inline inwards(v, o::Openness, p::Openness) = inwards(@∃(inwards(v, o)), p)
+
+"""
+    isempty(x::AInterval)
+
+Determine whether the interval contains no value.
+
+If emptiness is determined, the function returns `true` or `false`. Otherwise, it returns `missing`.
+"""
+@inline function Base.isempty((; ₍, l, r, ₎)::AInterval{T})::Union{Bool, Missing} where T
+    if isdiscrete(T)
+        # Move every open limit inwards to compare closed limits.
+        ll = @∃ inwards(l.l, l.₍, ₍) true
+        rr = @∃ inwards(r.r, r.₎, ₎) true
+        ll > rr && return true
+        lr = @∃ inwards(l.r, l.₎, ₍) true
+        rl = @∃ inwards(r.l, r.₍, ₎) true
+        return lr <= rl ? false : missing
+    else
+        # any open side keeps a single shared endpoint out
+        any_open = isopen(₍) || isopen(₎)
+        # Use `!<=` instead of `>` to get the correct `missing` for non-comparing bounds like `NaN`.
+        empty = !(l.l <= r.r) || l.l == r.r && (isopen(l.₍) || isopen(r.₎) || any_open)
+        nonempty = l.r < r.l || l.r == r.l && (!any_open || isopen(l.₎) || isopen(r.₍))
+
+        # Both cannot hold at once, so the pair carries the three states of one answer.
+        return empty || nonempty ? empty : missing
+    end
+end
+
+# Help inference when emptiness is determined.
+@inline Base.isempty(x::Union{InnerInterval, Line})::Bool = @invoke isempty(x::AInterval)
 
 # …
 # …⁽ or …₍
