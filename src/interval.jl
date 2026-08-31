@@ -103,7 +103,8 @@ that `a1 < a < a2` holds for the true value `a` of the left endpoint.
 
 When the uncertainty is `NegativeInfinity` or `PositiveInfinity`, the corresponding
 `Openness` needs to be `Open`. Those two are limits rather than values, so no bound at
-infinity holds a member, where a float `Inf` is an ordinary value of its type.
+infinity holds a member and neither of them is an element type, where a float `Inf` is an
+ordinary value of its type.
 
 Elements of an `Interval` shall not be `Interval`s. This is because `T` is required to have
 an ordering relation, which `Interval`s do not generally have. This restriction may be
@@ -119,6 +120,7 @@ struct Interval{T,Oₗ,Oᵣ,L,R} <: AInterval{T,Oₗ,Oᵣ,L,R}
         Oₗ isa typeunion(LeftOpenness) && Oᵣ isa typeunion(RightOpenness) || "Each bound needs a single `Openness`, not a union of them" |> ArgumentError |> throw
         (L == NegativeInfinity && Oₗ == LeftClosed || R == PositiveInfinity && Oᵣ == RightClosed ) && "Infinite closed bound detected" |> ArgumentError |> throw
         T === Union{} && "`Union{}` has no values, so it cannot be an element type" |> ArgumentError |> throw
+        T <: Union{NegativeInfinity, PositiveInfinity} && "Elements of an `Interval` shall not be `-∞`/`∞`" |> ArgumentError |> throw
         T <: Interval && "Elements of an `Interval` shall not be `Interval`s" |> ArgumentError |> throw
         new{T, Oₗ, Oᵣ, L, R}(left, right)
     end
@@ -216,8 +218,8 @@ Base.propertynames(x::AInterval) = (fieldnames(typeof(x))..., :l, :r, :₍, :₎
 
 @inline function Base.convert(TO::Type{<:Interval{T,Oₗ,Oᵣ,L,R} where {L <: _LeftInner, R <: _RightInner}}, x::AllInner) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness}
     x isa TO && return x
-    left = @something reopen(T, convert_inner(T, x.left), x.₍, Oₗ()) inexact(TO, x)
-    right = @something reopen(T, convert_inner(T, x.right), x.₎, Oᵣ()) inexact(TO, x)
+    left = @something respell(T, convert_inner(T, x.left), x.₍, Oₗ()) inexact(TO, x)
+    right = @something respell(T, convert_inner(T, x.right), x.₎, Oᵣ()) inexact(TO, x)
     return Interval{T, Oₗ, Oᵣ, typeof(left), typeof(right)}(left, right)
 end
 
@@ -330,55 +332,44 @@ Every type with a [`successor`](@ref) needs this method too, under the contract 
 predecessor(x::Union{NegativeInfinity, PositiveInfinity}) = x
 
 """
-    inwards(v, o::Openness)
-    inwards(v, o::Openness, p::Openness)
+    respell(::Type{T}, v, from::Openness, to::Openness)
 
-Possibly move the limit `v` one value inwards.
+Return the limit `v` of an interval over `T` spelled with the openness `to` in place of `from`, or `nothing` where no such limit exists.
 
-Only discrete element types move limits. A left openness moves `v` to its [`successor`](@ref) and a right one to its [`predecessor`](@ref). The result is `nothing` where the step would leave the type, which a left openness does at `typemax` and a right one at `typemin`.
+The closed spelling of an open limit uses one value inwards and the open spelling of a closed one use one value outwards, so only a discrete element type spells a limit both ways. An uncertain bound has no single value to move, so it keeps the openness it has.
 
 # Examples
 ```jldoctest
-julia> using UncertainIntervals: inwards, LeftOpen, RightOpen
+julia> using UncertainIntervals: respell, LeftOpen, LeftClosed
 
-julia> inwards(3, LeftOpen())   # `(3` and `[4` are the same bound
+julia> respell(Int, 3, LeftOpen(), LeftClosed())  # `(3` and `[4` are the same limit
 4
 
-julia> inwards(3, RightOpen())  # `3)` and `2]` are the same bound
+julia> respell(Int, 3, LeftClosed(), LeftOpen())  # `[3` and `(2` are the same limit
 2
 ```
 """
-@inline inwards(v, ::LeftOpen) = successor(v)
-@inline inwards(v, ::RightOpen) = predecessor(v)
-@inline inwards(v, ::Closed) = v
-@inline inwards(v, o::Openness, p::Openness) = inwards(@∃(inwards(v, o)), p)
+@inline respell(::Type{T}, v, from::LeftOpenness, to::LeftOpenness) where T =
+    from == to ? v : isdiscrete(T) ? (isclosed(to) ? successor(v) : predecessor(v)) : nothing
+@inline respell(::Type{T}, v, from::RightOpenness, to::RightOpenness) where T =
+    from == to ? v : isdiscrete(T) ? (isclosed(to) ? predecessor(v) : successor(v)) : nothing
+@inline respell(::Type, v::AInterval, from::LeftOpenness, to::LeftOpenness) = from == to ? v : nothing
+@inline respell(::Type, v::AInterval, from::RightOpenness, to::RightOpenness) = from == to ? v : nothing
 
-# The mirror of `inwards`: the limit `v` spelled open, which sits one value out of the closed spelling.
-@inline outwards(v, ::LeftClosed) = predecessor(v)
-@inline outwards(v, ::RightClosed) = successor(v)
-@inline outwards(v, ::Open) = v
-
-"""
-    reopen(::Type{T}, v, from::Openness, to::Openness)
-
-Return the limit `v` spelled with the openness `to` in place of `from`, or `nothing` where no such limit exists.
-
-Only a discrete element type spells a limit both ways, as the other spelling sits one value away. An uncertain bound has no such value, so it keeps the openness it has.
-"""
-@inline reopen(::Type{T}, v, from::Openness, to::Openness) where T =
-    from == to ? v :
-    isdiscrete(T) ? (isclosed(to) ? inwards(v, from) : outwards(v, from)) :
-    nothing
-@inline reopen(::Type, v::AInterval, from::Openness, to::Openness) = from == to ? v : nothing
+# The closed spelling of a limit, which a bound's limit reaches in two steps: once as the bound's own limit and once as the interval's.
+@inline inwards(::Type{T}, v, o::LeftOpenness) where T = respell(T, v, o, LeftClosed())
+@inline inwards(::Type{T}, v, o::RightOpenness) where T = respell(T, v, o, RightClosed())
+@inline inwards(::Type{T}, v, o::Openness, p::Openness) where T = inwards(T, @∃(inwards(T, v, o)), p)
 
 """
     canonical_widest(x::AInterval)::Union{Nothing, NamedTuple{(:ll, :rr)}}
 
 Return the limits of the widest interval `x` can be given its uncertainty.
 """
-@inline function canonical_widest((; ₍, l, r, ₎)::AInterval)::Union{Nothing, NamedTuple{(:ll, :rr)}}
-    ll = @∃ inwards(l.l, l.₍, ₍)
-    rr = @∃ inwards(r.r, r.₎, ₎)
+@inline function canonical_widest(x::AInterval{T})::Union{Nothing, NamedTuple{(:ll, :rr)}} where T
+    (; ₍, l, r, ₎) = x
+    ll = @∃ inwards(T, l.l, l.₍, ₍)
+    rr = @∃ inwards(T, r.r, r.₎, ₎)
     return (; ll, rr)
 end
 
@@ -387,9 +378,10 @@ end
 
 Return the limits of the narrowest interval `x` can be given its uncertainty.
 """
-@inline function canonical_narrowest((; ₍, l, r, ₎)::AInterval)::Union{Nothing, NamedTuple{(:lr, :rl)}}
-    lr = @∃ inwards(l.r, l.₎, ₍)
-    rl = @∃ inwards(r.l, r.₍, ₎)
+@inline function canonical_narrowest(x::AInterval{T})::Union{Nothing, NamedTuple{(:lr, :rl)}} where T
+    (; ₍, l, r, ₎) = x
+    lr = @∃ inwards(T, l.r, l.₎, ₍)
+    rl = @∃ inwards(T, r.l, r.₍, ₎)
     return (; lr, rl)
 end
 
@@ -401,8 +393,8 @@ Return the four limits of `x` given its uncertainty.
 @inline function canonical(x::AInterval{T})::Union{Nothing, NamedTuple{(:ll, :lr, :rl, :rr)}} where T
     (; ₍, l, r, ₎) = x
     (; ll, rr) = @∃ canonical_widest(x)
-    lr = @∃ narrowest_upper(T, inwards(l.r, l.₎, ₍), rr)
-    rl = @∃ narrowest_lower(T, inwards(r.l, r.₍, ₎), ll)
+    lr = @∃ narrowest_upper(T, inwards(T, l.r, l.₎, ₍), rr)
+    rl = @∃ narrowest_lower(T, inwards(T, r.l, r.₍, ₎), ll)
     return (; ll, lr, rl, rr)
 end
 
@@ -454,7 +446,7 @@ end
 @inline canonical_right_openness(::PositiveInfinity) = RightOpen
 @inline canonical_right_openness(_) = RightClosed
 
-# A limit one step beyond the element type has no closed spelling, which only `normalize` and `simplify` have to answer for.
+# A limit one step beyond the element type has no closed spelling, which only `normalize` has to answer for.
 @noinline no_canonical(x::AInterval{T}) where T = "`$x` has no canonical form, as a limit steps beyond `$T`" |> ArgumentError |> throw
 
 """
@@ -495,14 +487,16 @@ end
 
 Return the canonical form of `x` with every uncertainty that is down to a single value dropped.
 
-So `((1, 3), 7]` becomes `[3, 7]`, where [`normalize`](@ref) stops at `[[3, 3], 7]`. A limit at an extreme of the element type becomes the infinity beyond it, so `[5, typemax(Int)]` becomes `≥5`, which `normalize` leaves alone, and an endpoint that could take any value becomes `Line{T}()`. Both take the same limits, so both throw on the same `x`.
+So `((1, 3), 7]` becomes `[3, 7]`, where [`normalize`](@ref) stops at `[[3, 3], 7]`. A limit at an extreme of the element type becomes the infinity beyond it, so `[5, typemax(Int)]` becomes `≥5`, which `normalize` leaves alone, and an endpoint that could take any value becomes `Line{T}()`.
+
+Both take the same limits, but where none of them has a closed spelling, as for `([1, typemax(Int)], typemax(Int)]`, this call returns `x` unchanged rather than throwing as `normalize` does.
 
 Whether a bound collapses follows from the values rather than from the types, so the result type is not inferable and the call allocates. Reach for `normalize` wherever that matters.
 """
 function simplify(x::Interval{T,Oₗ,Oᵣ}) where {T,Oₗ,Oᵣ}
     # A dense element type has no limits to move, but a bound can still be down to one value.
     isdiscrete(T) || return Interval{T,Oₗ,Oᵣ}(coalesce(endpoint(x.left), x.left), coalesce(endpoint(x.right), x.right))
-    (; ll, lr, rl, rr) = @something canonical(x) no_canonical(x)
+    (; ll, lr, rl, rr) = @something canonical(x) return x
     left = ll == lr ? infinite_lower(T, ll) : simplified_bound(T, ll, lr)
     right = rl == rr ? infinite_upper(T, rr) : simplified_bound(T, rl, rr)
     return Interval{T, canonical_left_openness(left), canonical_right_openness(right), typeof(left), typeof(right)}(left, right)

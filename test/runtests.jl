@@ -50,6 +50,12 @@ end
     @test_throws ArgumentError OpenClosed(4, +∞)
     @test ClosedClosed(typemin(Int), typemax(Int)) isa Interval{Int, LeftClosed, RightClosed, Int, Int}
     @test ClosedClosed(-Inf, Inf) isa Interval{Float64, LeftClosed, RightClosed, Float64, Float64}
+
+    # An infinity names no element type, in a bound as much as in an interval.
+    @test_throws ArgumentError OpenOpen(+∞, +∞)
+    @test_throws ArgumentError OpenOpen(-∞, -∞)
+    @test_throws ArgumentError Line{PositiveInfinity}()
+    @test_throws ArgumentError i"[(∞, ∞), 5]"
 end
 
 @testset "Conversion" begin
@@ -293,32 +299,106 @@ end
     @test isequal(simplify(i"[(1.0, 3.0), 7.0]"), i"[(1.0, 3.0), 7.0]")
     @test isequal(simplify(i"[≥3.0, 9.0]"), i"[≥3.0, 9.0]")
 
-    # The extremes take the same limits as `normalize`, so they collapse and throw alike.
+    # The extremes take the same limits as `normalize`, so they collapse alike.
     @test isequal(simplify(i"(typemin(Int), typemax(Int))"), i"[typemin(Int) + 1, typemax(Int) - 1]")
     @test isequal(simplify(i"[[typemax(Int), typemax(Int)], 5]"), i"[typemax(Int), 5]")
     @test isequal(simplify(i"[[Inf, Inf], 5.0]"), i"[Inf, 5.0]")
     @test isequal(simplify(i"[-Inf, Inf]"), i"[-Inf, Inf]")
     @test isequal(simplify(i"([1, typemax(Int)], 5]"), i"[≥2, 5]") # the stalled limit spells as the infinity beyond it
+
+    # Where no limit has a closed spelling, the argument comes back unchanged instead of throwing as in `normalize`.
+    @test isequal(simplify(i"([1, typemax(Int)], typemax(Int)]"), i"([1, typemax(Int)], typemax(Int)]")
+    @test isequal(simplify(i"(true, true)"), i"(true, true)")
+
+    # An extreme of the element type names the same limit as the infinity beyond it, which is the canonical spelling.
+    @test isequal(simplify(i"[5, typemax(Int)]"), i"≥5")
+    @test isequal(simplify(i"[typemin(Int), 5]"), i"≤5")
+    @test isequal(simplify(i"[typemin(Int), typemax(Int)]"), Line{Int}())
+    @test isequal(simplify(i"[[typemin(Int), 5], 7]"), i"[≤5, 7]")
+    @test isequal(simplify(i"[[typemin(Int), typemax(Int)], 5]"), ClosedClosed(Line{Int}(), 5)) # an endpoint that could take any value
+    @test isequal(simplify(i"[big(5), big(9)]"), i"[big(5), big(9)]")
     @test isequal(simplify(i">5"), simplify(i"[6, typemax(Int)]")) # so `simplify` decides `==` again
 end
 
+@testset "Equality" begin
+    # `==` asks about the members, so over a discrete element type different spellings agree.
+    @test i"(3, 7)" == i"[4, 6]"
+    @test i">4" == i"≥5"
+    @test i"[5, 3]" == i"(5, 5)"              # every empty interval holds the same nothing
+    @test i"[1, 2]" != i"(1, 2]"              # `{1, 2}` against `{2}`
+    @test i"(3.0, 7.0)" != i"[4.0, 6.0]"      # a dense element type has no such collision
+    @test i"[1, 2]" != i"[1, 3]"
+    @test ismissing(i"[2, >4]" == i"[2, >4]") # an uncertain endpoint leaves the members open
+
+    # An uncertainty that is down to a single value determines the endpoint all the same.
+    @test i"[(1, 3), 7]" == i"[2, 7]"
+    @test i"((1, 3), 7]" == i"[3, 7]"
+    @test i"[(1, 3), 7]" != i"[3, 7]"
+    @test ismissing(i"[(1, 5), 7]" == i"[2, 7]")
+    @test ismissing(i"[(1, 5), 7]" == i"[(1, 5), 7]")
+
+    # A dense element type reads its bounds the same way, as only the values decide.
+    @test i"[[2.0, 2.0], 5.0]" == i"[2.0, 5.0]"
+    @test i"([2.0, 2.0], 5.0)" == i"(2.0, 5.0)"
+    @test i"[[2.0, 2.0], 5.0]" != i"(2.0, 5.0)"
+    @test ismissing(i"[(1.0, 3.0), 5.0]" == i"[2.0, 5.0]")
+
+    # `isequal` asks about the structure instead and always decides.
+    @test !isequal(i"(3, 7)", i"[4, 6]")
+    @test isequal(i"[4, 6]", i"[4, 6]")
+    @test isequal(i"[2, >4]", i"[2, >4]")
+
+    # A `BigInt` bound is not compared by its representation, so the `===` fallback is not enough.
+    @test isequal(i"[big(1), big(2)]", i"[big(1), big(2)]")
+    @test hash(i"[big(1), big(2)]") == hash(i"[big(1), big(2)]")
+    @test length(Set([i"[big(1), big(2)]", i"[big(1), big(2)]"])) == 1
+    @test get(Dict(i"[big(1), big(2)]" => :found), i"[big(1), big(2)]", :missed) === :found
+
+    # `==` follows the order on the bounds, `isequal` distinguishes what they distinguish.
+    @test i"[0.0, 1.0]" == i"[-0.0, 1.0]"
+    @test !isequal(i"[0.0, 1.0]", i"[-0.0, 1.0]")
+
+    # Another element type holds something else, so neither call it equal.
+    @test i"[1, 2]" != i"[1.0, 2.0]"
+    @test !isequal(i"[1, 2]", i"[1.0, 2.0]")
+
+    # An extreme decides like any other value, and a bound at infinity meets the one written as a value.
+    @test i"(typemax(Int), typemax(Int))" == i"[5, 3]"
+    @test i"(-∞, 5]" == i"≤5"
+    @test i"[0.0, Inf)" == i"≥0.0"
+    @test i"[NaN, NaN]" == i"[1.0, 0.0]" # `NaN` compares with nothing, so the interval holds nothing
+    @test isequal(i"[NaN, NaN]", i"[NaN, NaN]")
+    @test hash(i"[4, +∞)") == hash(i"≥4")
+
+    # A limit at infinity names the extreme of a discrete element type, as no member lies between the two.
+    @test i">5" == i"[6, typemax(Int)]"
+    @test i"[typemin(Int), typemax(Int)]" == Line{Int}()
+    @test !isequal(i">5", i"[6, typemax(Int)]")
+    @test Line{BigInt}() != i"[big(1), big(9)]" # without its guard the substitution would reach for `typemin(BigInt)`
+
+    # `Inf` is a value sitting where the limit `+∞` is, so a bound closed at it holds a member that the ray leaves out. A discrete element type reads the extreme and the infinity as one limit instead, and which of the two readings wins is open.
+    @test i"(-Inf, 5.0]" == i"≤5.0"
+    @test i"[-Inf, 5.0]" != i"≤5.0"
+    @test i"[0.0, Inf]" != i"≥0.0"
+end
 
 @testset "Interval Literals" begin
+    # A literal has to reproduce the structure, so these ask `isequal` rather than `==`.
     a, b = 3, 7
-    @test i"[1, 2)" == ClosedOpen(1, 2)
-    @test i"(1.5, 2.5]" == OpenClosed(1.5, 2.5)
-    @test i"  [ 1 , 2 ]  " == ClosedClosed(1, 2)
-    @test i">4" == Greater(4)
-    @test i"≥12" == GreaterEqual(12)
-    @test i"<5" == Less(5)
-    @test i"≤2.5" == LessEqual(2.5)
-    @test i">=12" == GreaterEqual(12)
-    @test i"<=2.5" == LessEqual(2.5)
-    @test i"[2, >=4]" == ClosedClosed(2, GreaterEqual(4))
+    @test isequal(i"[1, 2)", ClosedOpen(1, 2))
+    @test isequal(i"(1.5, 2.5]", OpenClosed(1.5, 2.5))
+    @test isequal(i"  [ 1 , 2 ]  ", ClosedClosed(1, 2))
+    @test isequal(i">4", Greater(4))
+    @test isequal(i"≥12", GreaterEqual(12))
+    @test isequal(i"<5", Less(5))
+    @test isequal(i"≤2.5", LessEqual(2.5))
+    @test isequal(i">=12", GreaterEqual(12))
+    @test isequal(i"<=2.5", LessEqual(2.5))
+    @test isequal(i"[2, >=4]", ClosedClosed(2, GreaterEqual(4)))
 
-    @test i"[a, b)" == ClosedOpen(3, 7)
-    @test i"[a + b, 2b]" == ClosedClosed(10, 14)
-    @test i"[max(1, 2), 5)" == ClosedOpen(2, 5) # the comma of a call must not split the interval
+    @test isequal(i"[a, b)", ClosedOpen(3, 7))
+    @test isequal(i"[a + b, 2b]", ClosedClosed(10, 14))
+    @test isequal(i"[max(1, 2), 5)", ClosedOpen(2, 5)) # the comma of a call must not split the interval
 
     @test i"[2, >4]" == ClosedClosed(2, Greater(4))
     @test i"(≥2.0, 5.2)" == OpenOpen(GreaterEqual(2.0), 5.2)
