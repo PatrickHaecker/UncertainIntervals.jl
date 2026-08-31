@@ -66,6 +66,8 @@ UncertainIntervals.successor(x::Date) = x + Day(1)
 UncertainIntervals.predecessor(x::Date) = x - Day(1)
 normalize(i"(Date(2024, 3, 1), Date(2024, 3, 8))") # [2024-03-02, 2024-03-07] (see below)
 ```
+A `Char` counts too and starts out dense as well, but there the step has to be chosen rather than derived, as `'\ud800'` to `'\udfff'` are no characters and `typemax(Char)` is none either, so counting code points and counting characters require different implementations of `successor(::Char)` and `predecessor(::Char)`.
+
 The `successor` docstring states the rest of the contract, such as the round trip both steps have to make.
 
 ## `==` asks about members, `isequal` about structure

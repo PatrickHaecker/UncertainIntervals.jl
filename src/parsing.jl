@@ -1,23 +1,43 @@
 # ASCII delimiters can be found byte-wise, as every non-ASCII UTF-8 byte is `>= 0x80`. Wider code units are rejected rather than misread.
 @inline utf8(s::AbstractString) = codeunits(s)::Base.CodeUnits{UInt8}
 
+# A quote right after a value is the adjoint operator, which is how Julia reads it too: https://github.com/JuliaLang/julia/blob/ba658ebd8c246bc3f3489586a89073b337b501f9/JuliaSyntax/src/julia/tokenize.jl#L1108
+@inline value_byte(b::UInt8) =
+    b >= 0x80 || UInt8('0') <= b <= UInt8('9') || UInt8('A') <= b <= UInt8('Z') || UInt8('a') <= b <= UInt8('z') ||
+    b in (UInt8('_'), UInt8('.'), UInt8(')'), UInt8(']'), UInt8('}'), UInt8('\''), UInt8('"'))
+
 """
     comma_index(s::AbstractString)
 
-Return the index of the comma separating the two bounds of `s`, which is an interval already stripped of its enclosing brackets. Commas of nested bounds and of any call in between are skipped, so a remaining enclosing bracket would hide the wanted one a level deep.
+Return the index of the comma separating the two bounds of `s`, which is an interval already stripped of its enclosing brackets. Commas of nested bounds and of any call in between are skipped, so a remaining enclosing bracket would hide the wanted one a level deep. A bracket or comma inside a character or string literal is text and counts for nothing.
 """
 function comma_index(s::AbstractString)::Union{Nothing, Int}
     depth = 0
     units = utf8(s)
-    for i in eachindex(units)
+    closing = UInt8('\0') # the quote a literal waits for, one of `'"'`, `'\''` and `'\0'` for none
+    previous = UInt8('\0')
+    i = firstindex(units)
+    while i <= lastindex(units)
         b = units[i]
-        if b == UInt8('(') || b == UInt8('[') || b == UInt8('{')
-            depth += 1
-        elseif b == UInt8(')') || b == UInt8(']') || b == UInt8('}')
-            depth -= 1
-        elseif b == UInt8(',') && depth == 0
-            return i
+        if closing == UInt8('\0')
+            if b == UInt8('"')
+                closing = b
+            elseif b == UInt8('\'')
+                value_byte(previous) || (closing = b)
+            elseif b in (UInt8('('), UInt8('['), UInt8('{'))
+                depth += 1
+            elseif b in (UInt8(')'), UInt8(']'), UInt8('}'))
+                depth -= 1
+            elseif b == UInt8(',') && depth == 0
+                return i
+            end
+        elseif b == UInt8('\\')
+            i += 1 # whatever follows the backslash is text
+        elseif b == closing
+            closing = UInt8('\0')
         end
+        previous = b
+        i += 1
     end
     return nothing
 end
@@ -183,7 +203,7 @@ end
 """
     interval_expr(str::AbstractString)
 
-Return the expression an interval in `print` format stands for. A bound which is no interval itself is handed to Julia verbatim, so it can be any expression.
+Return the expression an interval in `print` format stands for. A bound which is no interval itself is handed to Julia verbatim, so it can be any expression, except for a vector, which no bound can be.
 """
 function interval_expr(str::AbstractString)
     s = strip(str)
@@ -195,7 +215,11 @@ function interval_expr(str::AbstractString)
     expr = split_interval(s) do left_openness, right_openness, left, right
         :($Interval{$(left_openness |> typeof), $(right_openness |> typeof)}($(interval_expr(left)), $(interval_expr(right))))
     end
-    return isnothing(expr) ? Meta.parse(s) : expr
+    isnothing(expr) || return expr
+    bound = Meta.parse(s)
+    # A bracketed `str` whose bounds do not split reaches Julia as a vector, which would build silently.
+    bound isa Expr && bound.head === :vect && "`$s` is no interval, and a vector is no bound" |> ArgumentError |> throw
+    return bound
 end
 
 """

@@ -400,19 +400,38 @@ end
     @test isequal(i"[a + b, 2b]", ClosedClosed(10, 14))
     @test isequal(i"[max(1, 2), 5)", ClosedOpen(2, 5)) # the comma of a call must not split the interval
 
-    @test i"[2, >4]" == ClosedClosed(2, Greater(4))
-    @test i"(≥2.0, 5.2)" == OpenOpen(GreaterEqual(2.0), 5.2)
-    @test i"([-3.4, -2.87], ≥-1.4]" == OpenClosed(ClosedClosed(-3.4, -2.87), GreaterEqual(-1.4))
-    @test i"[[1, 2], [3, 4]]" == ClosedClosed(ClosedClosed(1, 2), ClosedClosed(3, 4))
+    # A bracket or comma inside a character or string literal is text, while a quote after a value is the adjoint operator.
+    @test isequal(i"[')', '(']", ClosedClosed(')', '('))
+    @test isequal(i"[',', 'z']", ClosedClosed(',', 'z'))
+    @test isequal(i"[length(\"(,\"), 5]", ClosedClosed(2, 5))
+    @test isequal(i"[length(\"\\\"\"), 5]", ClosedClosed(1, 5)) # an escaped quote does not end the literal
+    @test isequal(i"[a', b)", ClosedOpen(3, 7))
+    @test isequal(i"[length(\"ab\")', 5]", ClosedClosed(2, 5)) # a closing parenthesis ends a value too
+    @test isequal(i"[big\"1.5\"', 3.0]", ClosedClosed(big"1.5", big"3.0")) # so does the quote closing a string literal
 
-    @test i"[4, +∞)" == GreaterEqual(4)
-    @test i"[4, ∞)" == GreaterEqual(4) # a bare `∞` is the positive one
-    @test i"(-∞, 5]" == LessEqual(5)
+    @test isequal(i"[2, >4]", ClosedClosed(2, Greater(4)))
+    @test isequal(i"(≥2.0, 5.2)", OpenOpen(GreaterEqual(2.0), 5.2))
+    @test isequal(i"([-3.4, -2.87], ≥-1.4]", OpenClosed(ClosedClosed(-3.4, -2.87), GreaterEqual(-1.4)))
+    @test isequal(i"[[1, 2], [3, 4]]", ClosedClosed(ClosedClosed(1, 2), ClosedClosed(3, 4)))
+
+    @test isequal(i"[4, +∞)", GreaterEqual(4))
+    @test isequal(i"[4, ∞)", GreaterEqual(4)) # a bare `∞` is the positive one
+    @test isequal(i"(-∞, 5]", LessEqual(5))
     @test_throws ArgumentError i"(-∞, +∞)" # no bound carries the element type, so `Line{T}()` it is
+    @test_throws ArgumentError i"[(-∞, +∞), 5]" # the same holds for a bound, which the literal builds first
+    @test isequal(i"[Line{Int}(), 5]", ClosedClosed(Line{Int}(), 5))
+
+    # An extreme of the element type is an ordinary bound, `Inf` included.
+    @test isequal(i"(-∞, typemin(Int))", Less(typemin(Int)))
+    @test isequal(i"[typemax(Int), +∞)", GreaterEqual(typemax(Int)))
+    @test isequal(i"[-Inf, Inf]", ClosedClosed(-Inf, Inf))
 
     for x in (ClosedOpen(1, 4), Greater(4), LessEqual(2.5), ClosedClosed(2, OpenOpen(4, +∞)))
-        @test eval(UncertainIntervals.interval_expr(sprint(print, x))) == x
+        @test isequal(eval(UncertainIntervals.interval_expr(sprint(print, x))), x)
     end
+
+    # A bracketed string whose bounds do not split would reach Julia as a vector, which is called out rather than built.
+    @test_throws ArgumentError UncertainIntervals.interval_expr("[1]")
 end
 
 @testset "Bottom" begin
@@ -452,11 +471,6 @@ end
     @test !isnothing(@∃ 42)
     @test !isnothing(@⊤ true)
     @test !isnothing(@⊥ false)
+    @test !ismissing(@✓ 42)
+    @test ismissing(@⍰ missing)
 end
-
-# Test string interpolation
-# @testset "String Interpolation" begin
-#     # Test i_str macro
-#     str = @i_str "test"
-#     @test str == "test"
-# end
