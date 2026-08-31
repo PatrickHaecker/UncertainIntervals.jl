@@ -5,6 +5,10 @@
 # ∄     @∄: does not exist and continue      @∄⏎: does not exist and return
 # ⊤     @⊤: true and continue                @⊤⏎: true and return
 # ⊥     @⊥: false and continue               @⊥⏎: false and return
+# ✓     @✓: known and continue               @✓⏎: known and return
+# ⍰     @⍰: missing and continue             @⍰⏎: missing and return
+#
+# `exceptional` defaults to the sentinel a family tests for: `nothing` for ∃ and ∄, `missing` for ✓ and ⍰. A `Bool` has none, so ⊤ and ⊥ fall back to `nothing`.
 
 """
     @∃ regular exceptional=nothing
@@ -84,4 +88,41 @@ Exit the enclosing function returning `false` if `condition` fails. Otherwise ev
 """
 macro ⊥⏎(condition, exceptional=nothing)
     :($(condition |> esc) ? $(exceptional |> esc) : (return false))
+end
+
+
+"""
+    @✓ regular exceptional=missing
+
+Ensure a `regular` value is known (being not `missing`) and evaluate to its value. Otherwise exit the enclosing function returning `exceptional`.
+"""
+macro ✓(regular, exceptional=missing)
+    :(temp = $(regular |> esc); ismissing(temp) ? (return $(exceptional |> esc)) : temp)
+end
+
+"""
+    @⍰ regular exceptional=missing
+
+Ensure a `regular` value is unknown (being `missing`) and evaluate to `missing`. Otherwise exit the enclosing function returning `exceptional`.
+"""
+macro ⍰(regular, exceptional=missing)
+    :($(regular |> esc) |> ismissing ? missing : (return $(exceptional |> esc)))
+end
+
+"""
+    @✓⏎ regular exceptional=missing
+
+Exit the enclosing function returning the `regular` value if it is known (being not `missing`). Otherwise evaluate to `exceptional` and continue.
+"""
+macro ✓⏎(regular, exceptional=missing)
+    :(temp = $(regular |> esc); ismissing(temp) ? $(exceptional |> esc) : return temp)
+end
+
+"""
+    @⍰⏎ regular exceptional=missing
+
+Exit the enclosing function returning `missing` if the `regular` value is unknown. Otherwise evaluate to `exceptional` and continue.
+"""
+macro ⍰⏎(regular, exceptional=missing)
+    :($(regular |> esc) |> ismissing ? (return missing) : $(exceptional |> esc))
 end

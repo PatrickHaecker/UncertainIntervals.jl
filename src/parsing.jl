@@ -1,3 +1,6 @@
+# ASCII delimiters can be found byte-wise, as every non-ASCII UTF-8 byte is `>= 0x80`. Wider code units are rejected rather than misread.
+@inline utf8(s::AbstractString) = codeunits(s)::Base.CodeUnits{UInt8}
+
 """
     comma_index(s::AbstractString)
 
@@ -5,7 +8,7 @@ Return the index of the comma separating the two bounds of `s`, which is an inte
 """
 function comma_index(s::AbstractString)::Union{Nothing, Int}
     depth = 0
-    units = codeunits(s) # ASCII delimiters can be found byte-wise, as every non-ASCII UTF-8 byte is `>= 0x80`
+    units = utf8(s)
     for i in eachindex(units)
         b = units[i]
         if b == UInt8('(') || b == UInt8('[') || b == UInt8('{')
@@ -58,7 +61,7 @@ Return `f` applied to the comparison type `str` begins with and to the rest of `
 """
 function split_comparison(f, str::AbstractString)
     s = strip(str)
-    units = codeunits(s)
+    units = utf8(s)
     @⊥ isempty(s)
     leading = ncodeunits(s) >= 2 ? (@inbounds leading_pair(units)) : UInt16(units[1]) # a lone byte leaves the high half zero, which matches none of the spellings
     leading == leading_pair(">=") && return f(GreaterEqual, @view s[1 + ncodeunits(">=") : end])
@@ -111,10 +114,10 @@ end
     right = @∃ tryparse(T, right_str)
 
     # return Interval{left_openness, right_openness}(left, right)::CertainInterval{T} # Julia should be able to efficiently handle this
-    isclosed(left_openness) && isclosed(right_openness) && return ClosedClosedInner{T}(left, right)
-    isopen(left_openness) && isopen(right_openness) && return OpenOpenInner{T}(left, right)
-    isclosed(left_openness) && isopen(right_openness) && return ClosedOpenInner{T}(left, right)
-    return OpenClosedInner{T}(left, right) # or at least efficiently handle this – but it can't with Julia 1.13, although this is the least inefficient
+    isclosed(left_openness) && isclosed(right_openness) && return ClosedRegular{T}(left, right)
+    isopen(left_openness) && isopen(right_openness) && return OpenRegular{T}(left, right)
+    isclosed(left_openness) && isopen(right_openness) && return ClosedOpenRegular{T}(left, right)
+    return OpenClosedRegular{T}(left, right) # or at least efficiently handle this – but it can't with Julia 1.13, although this is the least inefficient
 end
 
 function Base.tryparse(::Type{<:CertainInterval{T}}, str::AbstractString) where T
@@ -123,7 +126,7 @@ function Base.tryparse(::Type{<:CertainInterval{T}}, str::AbstractString) where 
     end
 end
 
-# A target which pins the openness admits a single type, so it is built directly and an input of another openness is rejected. `typeunion` matches those four types invariantly, where a `<:` bound would also cover their union and lose to the method above.
+# A target which pins the openness leaves a single type, so it is built directly and an input of another openness is rejected. `typeunion` matches those four types invariantly, where a `<:` bound would also cover their union and lose to the method above.
 @inline function Base.tryparse(R::typeunion(CertainInterval{T}), str::AbstractString) where T
     split_interval(str) do left_openness, right_openness, left_str, right_str
         @⊤ R <: Interval{T, typeof(left_openness), typeof(right_openness)}
@@ -133,9 +136,25 @@ end
     end
 end
 
+# Not a `tryparse` method, as `Line{T}` and the comparisons meet where `T` is itself an infinity.
+"""
+    tryparse_line(::Type{T}, str::AbstractString)
+
+Return the line over `T` if `str` spells it, and `nothing` otherwise. Only a bound reaches this, as an interval of its own takes the element type from nowhere and `Line{T}()` names it instead.
+"""
+function tryparse_line(::Type{T}, str::AbstractString) where T
+    split_interval(str) do left_openness, right_openness, left_str, right_str
+        @⊤ isopen(left_openness) && isopen(right_openness)
+        @∃ tryparse(NegativeInfinity, left_str)
+        @∃ tryparse(PositiveInfinity, right_str)
+        Line{T}()
+    end
+end
+
 function Base.tryparse(::Type{Inner{T}}, s::AbstractString) where T
     @∃⏎ tryparse(T, s)
     @∃⏎ tryparse(Comparison{T}, s)
+    @∃⏎ tryparse_line(T, s)
     tryparse(CertainInterval{T}, s)
 end
 

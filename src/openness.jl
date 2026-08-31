@@ -21,10 +21,10 @@ const Open = Union{LeftOpen, RightOpen}
 const Closed = Union{LeftClosed, RightClosed}
 const Openness = Union{Open, Closed}
 
-isopen(x::LeftOpenness) = x == LeftOpen()
-isclosed(x::LeftOpenness) = x == LeftClosed()
-isopen(x::RightOpenness) = x == RightOpen()
-isclosed(x::RightOpenness) = x == RightClosed()
+isopen(::Open) = true
+isopen(::Closed) = false
+isclosed(::Closed) = true
+isclosed(::Open) = false
 
 Base.tryparse(O::typeunion(Openness), c::AbstractChar) = c == Char(O) ? O() : nothing
 Base.tryparse(::Type{LeftOpenness}, c::AbstractChar) = @∃⏎ tryparse(LeftOpen, c) tryparse(LeftClosed, c)

@@ -102,7 +102,8 @@ that you have a closed interval. The left endpoint of the interval is uncertain,
 that `a1 < a < a2` holds for the true value `a` of the left endpoint.
 
 When the uncertainty is `NegativeInfinity` or `PositiveInfinity`, the corresponding
-`Openness` needs to be `Open`.
+`Openness` needs to be `Open`. Those two are limits rather than values, so no bound at
+infinity holds a member, where a float `Inf` is an ordinary value of its type.
 
 Elements of an `Interval` shall not be `Interval`s. This is because `T` is required to have
 an ordering relation, which `Interval`s do not generally have. This restriction may be
@@ -114,9 +115,10 @@ struct Interval{T,Oₗ,Oᵣ,L,R} <: AInterval{T,Oₗ,Oᵣ,L,R}
 
     # At least with Julia 1.13 it is impossible to constraint the type parameters adequately. Therefore constraint at least the constructed objects.
     @inline function Interval{T,Oₗ,Oᵣ,L,R}(left::L, right::R) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness, L <: _LeftInner{T}, R <: _RightInner{T}}
-        # `Oₗ <: LeftOpenness` also admits `Union{}` and `LeftOpenness` itself.
+        # `Oₗ <: LeftOpenness` also covers `Union{}` and `LeftOpenness` itself.
         Oₗ isa typeunion(LeftOpenness) && Oᵣ isa typeunion(RightOpenness) || "Each bound needs a single `Openness`, not a union of them" |> ArgumentError |> throw
         (L == NegativeInfinity && Oₗ == LeftClosed || R == PositiveInfinity && Oᵣ == RightClosed ) && "Infinite closed bound detected" |> ArgumentError |> throw
+        T === Union{} && "`Union{}` has no values, so it cannot be an element type" |> ArgumentError |> throw
         T <: Interval && "Elements of an `Interval` shall not be `Interval`s" |> ArgumentError |> throw
         new{T, Oₗ, Oᵣ, L, R}(left, right)
     end
@@ -124,30 +126,15 @@ end
 
 const RightRay{T, Oₗ <: LeftOpenness} = Interval{T, Oₗ, RightOpen, T, PositiveInfinity}
 const LeftRay{T, Oᵣ <: RightOpenness} = Interval{T, LeftOpen, Oᵣ, NegativeInfinity, T}
-const RightOpenRay{T} = RightRay{T, LeftOpen}
-const LeftOpenRay{T} = LeftRay{T, RightOpen}
-const RightClosedRay{T} = RightRay{T, LeftClosed}
-const LeftClosedRay{T} = LeftRay{T, RightClosed}
-const CertainRay{T} = Union{RightOpenRay{T}, LeftOpenRay{T}, RightClosedRay{T}, LeftClosedRay{T}}
 
 const Line{T} = Interval{T, LeftOpen, RightOpen, NegativeInfinity, PositiveInfinity}
 Line{T}() where T = Line{T}(-∞, +∞)
 
-const OpenInf{T} = RightOpenRay{T}
-const OpenSup{T} = LeftOpenRay{T}
-const ClosedInf{T} = RightClosedRay{T}
-const ClosedSup{T} = LeftClosedRay{T}
-
-const LessThan{T} = LeftOpenRay{T}
-const AtMost{T} = LeftClosedRay{T}
-const AtLeast{T} = RightClosedRay{T}
-const GreaterThan{T} = RightOpenRay{T}
-
-const Greater{T} = RightOpenRay{T}
-const GreaterEqual{T} = RightClosedRay{T}
-const Less{T} = LeftOpenRay{T}
-const LessEqual{T} = LeftClosedRay{T}
-const Comparison{T} = CertainRay{T}
+const Greater{T} = RightRay{T, LeftOpen}
+const GreaterEqual{T} = RightRay{T, LeftClosed}
+const Less{T} = LeftRay{T, RightOpen}
+const LessEqual{T} = LeftRay{T, RightClosed}
+const Comparison{T} = Union{Greater{T}, GreaterEqual{T}, Less{T}, LessEqual{T}}
 const Comparisons = (Greater, GreaterEqual, Less, LessEqual)
 
 
@@ -158,23 +145,13 @@ const OpenClosedRegular{T} = RegularInterval{T, LeftOpen, RightClosed}
 const ClosedOpenRegular{T} = RegularInterval{T, LeftClosed, RightOpen}
 const CertainInterval{T} = Union{OpenRegular{T}, ClosedRegular{T}, OpenClosedRegular{T}, ClosedOpenRegular{T}}
 
-# const OpenInfOpenSup{T} = OpenRegular{T}
-# const ClosedInfClosedSup{T} = ClosedRegular{T}
-# const OpenInfClosedSup{T} = OpenClosedRegular{T}
-# const ClosedInfOpenSup{T} = ClosedOpenRegular{T}
-
-const InnerInterval{T} = Union{CertainRay{T}, CertainInterval{T}}
+const InnerInterval{T} = Union{CertainInterval{T}, Comparison{T}, Line{T}}
 # The uncertainty can only be expressed with values within a *certain* range to avoid infinite recursion. So it is no contradiction at all to define the `Uncertainty` with a certain value, a certain ray or a certain interval, but instead it is an absolute necessity.
 const Inner{T} = Union{T, InnerInterval{T}}
 const LeftInner{T} = Union{NegativeInfinity, Inner{T}}
 const RightInner{T} = Union{PositiveInfinity, Inner{T}}
 const AllInner{T} = Union{LeftInner{T}, RightInner{T}}
 # TODO: Check whether it makes sense to rename `Inner` to something else and then rename `AllInner` to `Inner`.
-
-const OpenOpenInner{T} = OpenRegular{T}
-const ClosedClosedInner{T} = ClosedRegular{T}
-const OpenClosedInner{T} = OpenClosedRegular{T}
-const ClosedOpenInner{T} = ClosedOpenRegular{T}
 
 const OpenOpen{T} = Interval{T, LeftOpen, RightOpen}
 const ClosedClosed{T} = Interval{T, LeftClosed, RightClosed}
@@ -213,13 +190,15 @@ end
 """
     limits(x)
 
-Return the limits of the values a bound can take, each with its openness: the lower one as `l`, its openness as `₍`, the upper one as `r`, its openness as `₎`. A bound with no uncertainty is the degenerate closed interval on its own value.
+Return the limits of the values a bound can take, each with its openness.
+
+The lower limit is `l` and its openness `₍`, the upper limit `r` and its openness `₎`. A bound with no uncertainty is the degenerate closed interval on its own value.
 """
 @inline limits(x) = (l = x, ₍ = LeftClosed(), r = x, ₎ = RightClosed())
-@inline limits(x::AInterval{T,Oₗ,Oᵣ}) where {T,Oₗ,Oᵣ} = (l = x.left, ₍ = Oₗ(), r = x.right, ₎ = Oᵣ())
+@inline limits(x::AInterval{<:Any,Oₗ,Oᵣ}) where {Oₗ,Oᵣ} = (l = x.left, ₍ = Oₗ(), r = x.right, ₎ = Oᵣ())
 
 # `l` and `r` reach a bound as an interval in its own right, so the same four names describe an endpoint at either depth.
-@inline function Base.getproperty(x::AInterval{T,Oₗ,Oᵣ}, s::Symbol) where {T,Oₗ,Oᵣ}
+@inline function Base.getproperty(x::AInterval{<:Any,Oₗ,Oᵣ}, s::Symbol) where {Oₗ,Oᵣ}
     s === :l && return limits(getfield(x, :left))
     s === :r && return limits(getfield(x, :right))
     s === :₍ && return Oₗ()
@@ -233,59 +212,206 @@ Base.propertynames(x::AInterval) = (fieldnames(typeof(x))..., :l, :r, :₍, :₎
 @inline convert_inner(::Type{T}, x::InnerInterval) where T = convert(Interval{T}, x)
 @inline convert_inner(::Type{T}, x) where T = convert(T, x)
 
+@noinline inexact(::Type{TO}, x) where TO = throw(InexactError(:convert, TO, x))
+
 @inline function Base.convert(TO::Type{<:Interval{T,Oₗ,Oᵣ,L,R} where {L <: _LeftInner, R <: _RightInner}}, x::AllInner) where {T, Oₗ <: LeftOpenness, Oᵣ <: RightOpenness}
     x isa TO && return x
-    left, right = convert(T, x.left), convert(T, x.right)
+    left = @something reopen(T, convert_inner(T, x.left), x.₍, Oₗ()) inexact(TO, x)
+    right = @something reopen(T, convert_inner(T, x.right), x.₎, Oᵣ()) inexact(TO, x)
     return Interval{T, Oₗ, Oᵣ, typeof(left), typeof(right)}(left, right)
 end
 
 for (T, c, field) in zip(Comparisons, ('>', '≥', '<', '≤'), (:left, :left, :right, :right))
     @eval Base.Char(::Type{$T}) = $c
     @eval Base.print(io::IO, x::$T) = print(io, $c, x.$field)
-    @eval Base.print(x::$T) = print(Base.stdout, x)
 end
 
-Base.print(io::IO, x::AInterval{T,Oₗ,Oᵣ}) where {T,Oₗ,Oᵣ} = print(io, Oₗ, x.left, ", ", x.right, Oᵣ)
-Base.print(x::AInterval{T,Oₗ,Oᵣ}) where {T,Oₗ,Oᵣ} = print(Base.stdout, x)
+Base.print(io::IO, x::AInterval{<:Any,Oₗ,Oᵣ}) where {Oₗ,Oᵣ} = print(io, Oₗ, x.left, ", ", x.right, Oᵣ)
 Base.show(io::IO, ::MIME"text/plain", x::AInterval) = print(io, x)
 
 Base.eltype(::Type{<:Interval{T}}) where T = T
 
+# `==` asks whether both hold the same members, so it answers `missing` wherever an uncertain endpoint leaves that open. `isequal` and `hash` stay structural and `Bool`, which `Dict` and `Set` need.
+# A member is an order class, so the canonical bounds are compared with the order rather than with `==` on the values. That keeps the answer well defined for an element type whose `==` disagrees with its order.
+# A differing element type falls through to the `===` fallback, as equal bounds do not mean equal contents: `(1, 2)` holds no `Int` where `(1.0, 2.0)` holds values by default.
+# The `===` fallback compares representations, which `BigInt` and `BigFloat` bounds fail to share between equal values.
+@inline order_equal(a, b) = a <= b && b <= a
+@inline same_openness(::AInterval{<:Any,O1ₗ,O1ᵣ}, ::AInterval{<:Any,O2ₗ,O2ᵣ}) where {O1ₗ,O1ᵣ,O2ₗ,O2ᵣ} = O1ₗ == O2ₗ && O1ᵣ == O2ᵣ
+
+# No member lies between an extreme of the element type and the infinity beyond it, so the two name the same limit. A type without extremes keeps its infinities.
+@inline extreme_limit(::Type, v) = v
+@inline extreme_limit(::Type{T}, v::NegativeInfinity) where T = Base.hastypemax(T) ? typemin(T) : v
+@inline extreme_limit(::Type{T}, v::PositiveInfinity) where T = Base.hastypemax(T) ? typemax(T) : v
+@inline extreme_limits(::Type{T}, limits::NamedTuple) where T = map(v -> extreme_limit(T, v), limits)
+
+# The single value a bound stands for, or `missing` where its uncertainty leaves a choice.
+@inline endpoint(b) = b
+@inline function endpoint(b::AInterval)
+    (; l, ₍, r, ₎) = limits(b)
+    return order_equal(l, r) && isclosed(₍) && isclosed(₎) ? l : missing
+end
+
+function Base.:(==)(x::AInterval{T}, y::AInterval{T})::Union{Bool, Missing} where T
+    empty_x, empty_y = isempty(x), isempty(y)
+    (ismissing(empty_x) || ismissing(empty_y)) && return missing
+    empty_x && return empty_y # every empty interval holds the same nothing
+    empty_y && return false
+
+    return if isdiscrete(T)
+        # Both hold a value, so no limit runs out of the element type.
+        xll, xlr, xrl, xrr = extreme_limits(T, something(canonical(x)))
+        yll, ylr, yrl, yrr = extreme_limits(T, something(canonical(y)))
+        # Equality can't be determined if any endpoint is uncertain.
+        order_equal(xll, xlr) && order_equal(xrl, xrr) && order_equal(yll, ylr) && order_equal(yrl, yrr) || return missing
+        # The intervals are equal if their canonical minimum and maximum agree.
+        order_equal(xll, yll) && order_equal(xrr, yrr)
+    else
+        xl, xr = @✓(endpoint(x.left)), @✓(endpoint(x.right))
+        yl, yr = @✓(endpoint(y.left)), @✓(endpoint(y.right))
+        same_openness(x, y) && order_equal(xl, yl) && order_equal(xr, yr)
+    end
+end
+
+# Every pair of intervals needs a method, as `isequal` would otherwise fall back on `==` and inherit set identity.
+Base.isequal(x::AInterval{T1,O1ₗ,O1ᵣ}, y::AInterval{T2,O2ₗ,O2ᵣ}) where {T1,O1ₗ,O1ᵣ,T2,O2ₗ,O2ᵣ} =
+    T1 === T2 && O1ₗ === O2ₗ && O1ᵣ === O2ᵣ && isequal(x.left, y.left) && isequal(x.right, y.right)
+
+# `hash` takes the seed last, but a vararg has to come last, so the seed leads here.
+@inline hash_all(h::UInt) = h
+@inline hash_all(h::UInt, v, vs...) = hash_all(hash(v, h), vs...)
+
+Base.hash(x::AInterval{T,Oₗ,Oᵣ}, h::UInt) where {T,Oₗ,Oᵣ} = hash_all(h, T, Oₗ, Oᵣ, x.left, x.right)
+
+# `Infinities` gives its infinities no `hash` (2026-08-30) and Base's `Real` fallback needs a `decompose` they lack, so fill the gap only while it is one.
+# Only the two singletons, as `Float64` overflows the stack for any further subtype of `RealInfinity`, and every float infinity hashes alike so the width is immaterial.
+which(hash, Tuple{Union{NegativeInfinity, PositiveInfinity}, UInt}) === which(hash, Tuple{Real, UInt}) &&
+    @eval Base.hash(x::Union{NegativeInfinity, PositiveInfinity}, h::UInt) = hash(Float64(x), h)
+
 """
     isdiscrete(T::Type)
 
-Determine whether the values of `T` have neighbors, so that every open bound equals the closed one a step further in.
+Determine whether `T` is interpreted as having neighboring values.
+
+A type is discrete once it has a [`successor`](@ref) method, so per default `Int` is discrete and `Float64` is not.
+Define `isdiscrete` yourself only to overrule that, as in
+`UncertainIntervals.isdiscrete(::Type{Float64}) = false` for a type whose neighbors serve
+another purpose.
 """
-isdiscrete(::Type) = false
-isdiscrete(::Type{<:Integer}) = true
+isdiscrete(::Type{T}) where T = hasmethod(successor, Tuple{T})
+isdiscrete(::Type{Union{}}) = "`Union{}` has no values that could be neighbors" |> ArgumentError |> throw
 
 """
-    nextvalue(x)
+    successor(x::T)::Union{Nothing, T}
 
-Return the neighbor above `x`, or `nothing` where the type ends. Only a discrete interval steps its bounds, so a dense one's values have no method here.
+Return the neighbor above `x`, or `nothing` if `x`'s type holds no larger value.
+
+Defining this method is what makes `T` discrete, so define [`predecessor`](@ref) along with it. Both owe the same contract:
+
+- The neighbor has the type of `x`.
+- `nothing` says the type holds no further value.
+- No value of `T` lies between `x` and its neighbor
+- `predecessor(x) < x < successor(x)`.
+- `predecessor(successor(x)) == x` wherever both exist (=not `nothing`).
+
+`T` itself needs `isless` and `==`. Where `Base.hastypemax(T)` holds, a limit at infinity names that extreme, so `>5` and `[6, typemax(T)]` hold the same members.
 """
-nextvalue(x::Integer) = Base.hastypemax(typeof(x)) && x == typemax(x) ? nothing : x + oneunit(x)
-# An infinite bound is its own neighbor, as it already lies beyond every value.
-nextvalue(x::NegativeInfinity) = x
+(successor(x::T)::Union{Nothing, T}) where T <: Integer = Base.hastypemax(T) && x == typemax(x) ? nothing : x + oneunit(x)
+# An infinite bound is its own neighbor in either direction, as it already lies beyond every value.
+successor(x::Union{NegativeInfinity, PositiveInfinity}) = x
 
 """
-    prevvalue(x)
+    predecessor(x::T)::Union{Nothing, T}
 
-Return the neighbor below `x`, mirroring [`nextvalue`](@ref).
+Return the neighbor below `x`, or `nothing` if `x`'s type holds no smaller value.
+
+Every type with a [`successor`](@ref) needs this method too, under the contract stated there.
 """
-prevvalue(x::Integer) = Base.hastypemax(typeof(x)) && x == typemin(x) ? nothing : x - oneunit(x)
-prevvalue(x::PositiveInfinity) = x
+(predecessor(x::T)::Union{Nothing, T}) where T <: Integer = Base.hastypemax(T) && x == typemin(x) ? nothing : x - oneunit(x)
+predecessor(x::Union{NegativeInfinity, PositiveInfinity}) = x
 
 """
     inwards(v, o::Openness)
     inwards(v, o::Openness, p::Openness)
 
-Move the limit `v` one value inwards for each openness that excludes it, upwards for a left openness and downwards for a right one. Return `nothing` where the type ends.
+Possibly move the limit `v` one value inwards.
+
+Only discrete element types move limits. A left openness moves `v` to its [`successor`](@ref) and a right one to its [`predecessor`](@ref). The result is `nothing` where the step would leave the type, which a left openness does at `typemax` and a right one at `typemin`.
+
+# Examples
+```jldoctest
+julia> using UncertainIntervals: inwards, LeftOpen, RightOpen
+
+julia> inwards(3, LeftOpen())   # `(3` and `[4` are the same bound
+4
+
+julia> inwards(3, RightOpen())  # `3)` and `2]` are the same bound
+2
+```
 """
-@inline inwards(v, ::LeftOpen) = nextvalue(v)
-@inline inwards(v, ::RightOpen) = prevvalue(v)
+@inline inwards(v, ::LeftOpen) = successor(v)
+@inline inwards(v, ::RightOpen) = predecessor(v)
 @inline inwards(v, ::Closed) = v
 @inline inwards(v, o::Openness, p::Openness) = inwards(@∃(inwards(v, o)), p)
+
+# The mirror of `inwards`: the limit `v` spelled open, which sits one value out of the closed spelling.
+@inline outwards(v, ::LeftClosed) = predecessor(v)
+@inline outwards(v, ::RightClosed) = successor(v)
+@inline outwards(v, ::Open) = v
+
+"""
+    reopen(::Type{T}, v, from::Openness, to::Openness)
+
+Return the limit `v` spelled with the openness `to` in place of `from`, or `nothing` where no such limit exists.
+
+Only a discrete element type spells a limit both ways, as the other spelling sits one value away. An uncertain bound has no such value, so it keeps the openness it has.
+"""
+@inline reopen(::Type{T}, v, from::Openness, to::Openness) where T =
+    from == to ? v :
+    isdiscrete(T) ? (isclosed(to) ? inwards(v, from) : outwards(v, from)) :
+    nothing
+@inline reopen(::Type, v::AInterval, from::Openness, to::Openness) = from == to ? v : nothing
+
+"""
+    canonical_widest(x::AInterval)::Union{Nothing, NamedTuple{(:ll, :rr)}}
+
+Return the limits of the widest interval `x` can be given its uncertainty.
+"""
+@inline function canonical_widest((; ₍, l, r, ₎)::AInterval)::Union{Nothing, NamedTuple{(:ll, :rr)}}
+    ll = @∃ inwards(l.l, l.₍, ₍)
+    rr = @∃ inwards(r.r, r.₎, ₎)
+    return (; ll, rr)
+end
+
+"""
+    canonical_narrowest(x::AInterval)::Union{Nothing, NamedTuple{(:lr, :rl)}}
+
+Return the limits of the narrowest interval `x` can be given its uncertainty.
+"""
+@inline function canonical_narrowest((; ₍, l, r, ₎)::AInterval)::Union{Nothing, NamedTuple{(:lr, :rl)}}
+    lr = @∃ inwards(l.r, l.₎, ₍)
+    rl = @∃ inwards(r.l, r.₍, ₎)
+    return (; lr, rl)
+end
+
+"""
+    canonical(x::AInterval)::Union{Nothing, NamedTuple{(:ll, :lr, :rl, :rr)}}
+
+Return the four limits of `x` given its uncertainty.
+"""
+@inline function canonical(x::AInterval{T})::Union{Nothing, NamedTuple{(:ll, :lr, :rl, :rr)}} where T
+    (; ₍, l, r, ₎) = x
+    (; ll, rr) = @∃ canonical_widest(x)
+    lr = @∃ narrowest_upper(T, inwards(l.r, l.₎, ₍), rr)
+    rl = @∃ narrowest_lower(T, inwards(r.l, r.₍, ₎), ll)
+    return (; ll, lr, rl, rr)
+end
+
+# A step out of the element type drops the one endpoint that reaches beyond it, and that endpoint leaves `x` empty. The extreme stands in for it wherever a kept endpoint leaves `x` empty as well, which keeps every possible member set.
+@inline narrowest_upper(::Type{T}, v, rr) where T = isnothing(v) && Base.hastypemax(T) && rr < typemax(T) ? typemax(T) : v
+@inline narrowest_lower(::Type{T}, v, ll) where T = isnothing(v) && Base.hastypemax(T) && typemin(T) < ll ? typemin(T) : v
+
+# A bound whose own limits conflict leaves no value for the endpoint.
+@inline bound_isempty((; l, ₍, r, ₎)) = !(l <= r) || l == r && (isopen(₍) || isopen(₎))
 
 """
     isempty(x::AInterval)
@@ -294,34 +420,98 @@ Determine whether the interval contains no value.
 
 If emptiness is determined, the function returns `true` or `false`. Otherwise, it returns `missing`.
 """
-@inline function Base.isempty((; ₍, l, r, ₎)::AInterval{T})::Union{Bool, Missing} where T
+@inline function Base.isempty(x::AInterval{T})::Union{Bool, Missing} where T
     if isdiscrete(T)
         # Move every open limit inwards to compare closed limits.
-        ll = @∃ inwards(l.l, l.₍, ₍) true
-        rr = @∃ inwards(r.r, r.₎, ₎) true
-        ll > rr && return true
-        lr = @∃ inwards(l.r, l.₎, ₍) true
-        rl = @∃ inwards(r.l, r.₍, ₎) true
+        ll, rr = extreme_limits(T, @∃ canonical_widest(x) true)
+        # `!<=` rather than `>`, as a limit that compares with nothing leaves no member either.
+        @⊤⏎ !(ll <= rr)
+        # A narrowest limit that steps out of the element type only shows that some endpoint empties `x`.
+        lr, rl = extreme_limits(T, @∃ canonical_narrowest(x) missing)
+        # An endpoint with no value to take leaves the interval with no members.
+        @⊤⏎ !(ll <= lr) || !(rl <= rr)
         return lr <= rl ? false : missing
     else
+        (; ₍, l, r, ₎) = x
         # any open side keeps a single shared endpoint out
         any_open = isopen(₍) || isopen(₎)
         # Use `!<=` instead of `>` to get the correct `missing` for non-comparing bounds like `NaN`.
-        empty = !(l.l <= r.r) || l.l == r.r && (isopen(l.₍) || isopen(r.₎) || any_open)
+        empty = bound_isempty(l) || bound_isempty(r) ||
+            !(l.l <= r.r) || l.l == r.r && (isopen(l.₍) || isopen(r.₎) || any_open)
         nonempty = l.r < r.l || l.r == r.l && (!any_open || isopen(l.₎) || isopen(r.₍))
 
-        # Both cannot hold at once, so the pair carries the three states of one answer.
+        # Only an empty bound satisfies both, and there `empty` is the one that answers.
         return empty || nonempty ? empty : missing
     end
 end
 
 # Help inference when emptiness is determined.
-@inline Base.isempty(x::Union{InnerInterval, Line})::Bool = @invoke isempty(x::AInterval)
+@inline Base.isempty(x::InnerInterval)::Bool = @invoke isempty(x::AInterval)
+
+# A limit at infinity is the one that cannot be reached, so it is the one that stays open.
+@inline canonical_left_openness(::NegativeInfinity) = LeftOpen
+@inline canonical_left_openness(_) = LeftClosed
+@inline canonical_right_openness(::PositiveInfinity) = RightOpen
+@inline canonical_right_openness(_) = RightClosed
+
+# A limit one step beyond the element type has no closed spelling, which only `normalize` and `simplify` have to answer for.
+@noinline no_canonical(x::AInterval{T}) where T = "`$x` has no canonical form, as a limit steps beyond `$T`" |> ArgumentError |> throw
+
+"""
+    normalize(x::Interval)
+
+Return the canonical form of `x`.
+
+A discrete element type moves every open finite limit to the closed one a step inwards, so that `(3, 7)` becomes `[4, 6]` and `((1, 3), 7]` becomes `[[3, 3], 7]`. A limit at infinity stays open, and a dense element type leaves the interval as it is.
+
+An empty interval has no canonical form, so an endpoint that empties `x` may be swapped for another one that empties it too, and a step beyond the element type stalls at the extreme. The call throws an `ArgumentError` where that swap is not available, as for `([1, typemax(Int)], typemax(Int)]`, and where the widest limit is the one that steps too far, as for `(typemax(Int), +∞)`.
+
+Every bound keeps the shape it had, so the result type follows from the argument type. Use [`simplify`](@ref) to also drop an uncertainty that is fully resolved to a single value.
+"""
+@inline function normalize(x::Interval{T}) where T
+    isdiscrete(T) || return x
+    (; ll, lr, rl, rr) = @something canonical(x) no_canonical(x)
+    left, right = canonical_bound(x.left, ll, lr), canonical_bound(x.right, rl, rr)
+    return Interval{T, canonical_left_openness(left), canonical_right_openness(right), typeof(left), typeof(right)}(left, right)
+end
+
+# Taking the shape from the bound that is already there keeps every type independent of the values.
+@inline canonical_bound(::AInterval, lo, hi) = Interval{canonical_left_openness(lo), canonical_right_openness(hi)}(lo, hi)
+@inline canonical_bound(_, lo, _) = lo
+
+# The other end of `extreme_limit`: the same limit spelled as the infinity beyond the extreme, which is the spelling no element type outgrows.
+@inline infinite_lower(::Type{T}, v) where T = Base.hastypemax(T) && v == typemin(T) ? -∞ : v
+@inline infinite_upper(::Type{T}, v) where T = Base.hastypemax(T) && v == typemax(T) ? +∞ : v
+
+# An endpoint that could take any value is the line over the element type.
+@inline function simplified_bound(::Type{T}, lo, hi) where T
+    l, h = infinite_lower(T, lo), infinite_upper(T, hi)
+    return l isa NegativeInfinity && h isa PositiveInfinity ? Line{T}() :
+        Interval{canonical_left_openness(l), canonical_right_openness(h)}(l, h)
+end
+
+"""
+    simplify(x::Interval)
+
+Return the canonical form of `x` with every uncertainty that is down to a single value dropped.
+
+So `((1, 3), 7]` becomes `[3, 7]`, where [`normalize`](@ref) stops at `[[3, 3], 7]`. A limit at an extreme of the element type becomes the infinity beyond it, so `[5, typemax(Int)]` becomes `≥5`, which `normalize` leaves alone, and an endpoint that could take any value becomes `Line{T}()`. Both take the same limits, so both throw on the same `x`.
+
+Whether a bound collapses follows from the values rather than from the types, so the result type is not inferable and the call allocates. Reach for `normalize` wherever that matters.
+"""
+function simplify(x::Interval{T,Oₗ,Oᵣ}) where {T,Oₗ,Oᵣ}
+    # A dense element type has no limits to move, but a bound can still be down to one value.
+    isdiscrete(T) || return Interval{T,Oₗ,Oᵣ}(coalesce(endpoint(x.left), x.left), coalesce(endpoint(x.right), x.right))
+    (; ll, lr, rl, rr) = @something canonical(x) no_canonical(x)
+    left = ll == lr ? infinite_lower(T, ll) : simplified_bound(T, ll, lr)
+    right = rl == rr ? infinite_upper(T, rr) : simplified_bound(T, rl, rr)
+    return Interval{T, canonical_left_openness(left), canonical_right_openness(right), typeof(left), typeof(right)}(left, right)
+end
 
 # …
-# …⁽ or …₍
-# …⁾
-# …⁽⁾(l::L, r::R) where {L,R}
+# …₍
+# …₎
+# …₍₎(l::L, r::R) where {L,R}
 
 # 2 …⁽ 4
 # 2 …₍ 4

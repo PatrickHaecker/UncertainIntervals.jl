@@ -1,5 +1,11 @@
 [deps]
+Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 Infinities = "e1ba4f0e-776d-440f-acd9-e1d2e9742647"
+JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 UncertainIntervals = "1853b6f7-4c2b-4ead-9554-d01d2aac1500"
 UseAll = "edbe3dbe-4909-5f9e-bb65-679d27932c2a"
+
+[compat]
+Aqua = "0.8"
+JET = "0.9, 0.10, 0.11, 0.12"

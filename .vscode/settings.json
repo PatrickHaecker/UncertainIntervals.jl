@@ -1,8 +1,9 @@
 {
     "cSpell.allowCompoundWords": true,
     "cSpell.words": [
+        "invariantly",
         "isclosed",
         "isdiscrete",
-        "prevvalue"
+        "jldoctest",
     ]
 }

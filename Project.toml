@@ -16,6 +16,7 @@ UseAll = {rev = "main", url = "https://github.com/PatrickHaecker/UseAll.jl"}
 [compat]
 Infinities = "0.1.12"
 UseAll = "0.1"
+julia = "1.10"
 
 [extras]
 UseAll = "edbe3dbe-4909-5f9e-bb65-679d27932c2a"
