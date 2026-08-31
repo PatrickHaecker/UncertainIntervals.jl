@@ -9,9 +9,10 @@
 """
     comma_index(s::AbstractString)
 
-Return the index of the comma separating the two bounds of `s`, which is an interval already stripped of its enclosing brackets. Commas of nested bounds and of any call in between are skipped, so a remaining enclosing bracket would hide the wanted one a level deep. A bracket or comma inside a character or string literal is text and counts for nothing.
+Return the index of the comma separating the two bounds of `s`, which is an interval already stripped of its enclosing brackets, or `nothing` where `s` does not hold exactly one such comma. Commas of nested bounds and of any call in between are skipped, so a remaining enclosing bracket would hide the wanted one a level deep. A bracket or comma inside a character or string literal is text and counts for nothing.
 """
 function comma_index(s::AbstractString)::Union{Nothing, Int}
+    index = 0 # no index of its own, so it stands for the comma still missing
     depth = 0
     units = utf8(s)
     closing = UInt8('\0') # the quote a literal waits for, one of `'"'`, `'\''` and `'\0'` for none
@@ -29,7 +30,8 @@ function comma_index(s::AbstractString)::Union{Nothing, Int}
             elseif b in (UInt8(')'), UInt8(']'), UInt8('}'))
                 depth -= 1
             elseif b == UInt8(',') && depth == 0
-                return i
+                index == 0 || return nothing # two bounds take one comma, so `s` is no interval
+                index = i
             end
         elseif b == UInt8('\\')
             i += 1 # whatever follows the backslash is text
@@ -39,7 +41,7 @@ function comma_index(s::AbstractString)::Union{Nothing, Int}
         previous = b
         i += 1
     end
-    return nothing
+    return index == 0 ? nothing : index
 end
 
 # Packing the pair lets a two-byte prefix be compared in one step, and the little-endian order matches a two-byte load on a little-endian host.
@@ -198,6 +200,21 @@ function Base.tryparse(::Type{<:Interval{T}}, str::AbstractString) where T
         right = @∃ tryparse(RightInner{T}, right_str)
         Interval{T, left_openness |> typeof, right_openness |> typeof}(left, right)
     end
+end
+
+# `print` of an openness type is its bracket, so the type is shown rather than printed.
+@noinline no_parse(::Type{R}, x) where R = "`$x` spells no `$(sprint(show, R))`" |> ArgumentError |> throw
+
+"""
+    parse(::Type{R}, s::AbstractString)
+
+Return the `R` that `s` spells, and throw an `ArgumentError` where it spells none. Which spellings there are is what `tryparse` says.
+"""
+Base.parse(::Type{R}, s::AbstractString) where R <: AInterval = @something tryparse(R, s) no_parse(R, s)
+
+# A bound is a `Union` holding the element type itself, which no `<:` bound of a type parameter matches.
+for I in (Inner, LeftInner, RightInner)
+    @eval Base.parse(::Type{$I{T}}, s::AbstractString) where T = @something tryparse($I{T}, s) no_parse($I{T}, s)
 end
 
 """

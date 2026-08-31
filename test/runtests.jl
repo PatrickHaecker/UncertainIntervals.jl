@@ -18,7 +18,10 @@ end
     # Julia does solve `T` out of `Type{Inner{T}}`, which the check cannot see. Anything else unbound still fails.
     bounds = (which(tryparse, Tuple{Type{Inner{Int}}, AbstractString}),
               which(tryparse, Tuple{Type{LeftInner{Int}}, AbstractString}),
-              which(tryparse, Tuple{Type{RightInner{Int}}, AbstractString}))
+              which(tryparse, Tuple{Type{RightInner{Int}}, AbstractString}),
+              which(parse, Tuple{Type{Inner{Int}}, AbstractString}),
+              which(parse, Tuple{Type{LeftInner{Int}}, AbstractString}),
+              which(parse, Tuple{Type{RightInner{Int}}, AbstractString}))
     @test issubset(Aqua.detect_unbound_args_recursively(UncertainIntervals), bounds)
 end
 
@@ -110,6 +113,7 @@ end
 
     @test isnothing(tryparse(ClosedOpenRegular{Int}, "no interval"))
     @test isnothing(tryparse(ClosedOpenRegular{Int}, "[x, 2)"))
+    @test isnothing(tryparse(ClosedRegular{Int}, "[1, 2, 3]")) # two bounds take one comma
 end
 @testset "Parse Rays" begin
     @test isequal(tryparse(Interval{Int}, ">4"), Greater(4))
@@ -141,6 +145,24 @@ end
     @test sprint(print, ClosedClosed(Line{Int}(), 5)) == "[(-∞, +∞), 5]"
     @test ismissing(isempty(ClosedClosed(Line{Int}(), 5)))
     @test isnothing(tryparse(Interval{Int}, "[(-∞, +∞], 5]")) # an infinite bound stays open
+end
+
+@testset "Parse" begin
+    # `parse` takes its spellings from `tryparse` and turns a failure into an exception.
+    @test isequal(parse(Interval{Int}, "(2, 5)"), OpenOpen(2, 5))
+    @test isequal(parse(Interval{Int}, "[2, >4]"), ClosedClosed(2, Greater(4)))
+    @test parse(ClosedRegular{Int}, "[1, 2]") === ClosedClosed(1, 2)
+    @test parse(Inner{Int}, "5") === 5
+    @test parse(RightInner{Int}, "+∞") === +∞
+    @test_throws ArgumentError parse(Interval{Int}, "[1, 2, 3]")
+    @test_throws ArgumentError parse(OpenRegular{Int}, "[1, 2]")
+    @test_throws ArgumentError parse(LeftInner{Int}, "+∞")
+
+    # A single bracket names an openness, where the failure is the same one.
+    @test parse(LeftOpenness, '(') === LeftOpen()
+    @test parse(RightClosed, ']') === RightClosed()
+    @test_throws ArgumentError parse(LeftOpenness, ']')
+    @test_throws ArgumentError parse(RightClosed, ')')
 end
 
 @testset "Printing" begin
@@ -432,6 +454,7 @@ end
 
     # A bracketed string whose bounds do not split would reach Julia as a vector, which is called out rather than built.
     @test_throws ArgumentError UncertainIntervals.interval_expr("[1]")
+    @test_throws ArgumentError UncertainIntervals.interval_expr("[1, 2, 3]")
 end
 
 @testset "Bottom" begin

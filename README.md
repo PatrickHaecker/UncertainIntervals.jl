@@ -18,7 +18,7 @@ ClosedClosed(1, 2)                # [1, 2]
 Greater(4)                        # >4
 Line{Int}()                       # (-∞, +∞)
 ClosedClosed(ClosedOpen(1, 5), 7) # [[1, 5), 7], a left endpoint somewhere in [1, 5)
-tryparse(Interval{Int}, "[1, 2)") # the literal without the macro
+parse(Interval{Int}, "[1, 2)")    # the literal without the macro, `tryparse` for a `nothing` instead of a throw
 ```
 
 Any ordered type will do:
