@@ -260,6 +260,47 @@ UncertainIntervals.predecessor(x::Fuzzy) = Fuzzy(prevfloat(x.v))
     @test (@inferred isempty(Line{Int}())) === false
 end
 
+@testset "Membership" begin
+    @test 5 ∈ i"[1, 9]"
+    @test 1 ∈ i"[1, 9]"
+    @test !(0 ∈ i"[1, 9]")
+    @test !(1 ∈ i"(1, 9)")
+    @test 2 ∈ i"(1, 9)"
+    @test 5 ∈ i">4"
+    @test !(4 ∈ i">4")
+    @test 0 ∈ Line{Int}()
+
+    # Every endpoint the uncertainty allows has to agree.
+    @test ismissing(5 ∈ i"[(1, 9), 20]")
+    @test 9 ∈ i"[(1, 9), 20]"
+    @test !(1 ∈ i"[(1, 9), 20]")
+    @test !(21 ∈ i"[(1, 9), 20]")
+
+    # An empty interval holds no value at all.
+    @test !(5 ∈ i"[5, 3]")
+    @test !(5 ∈ i"(5, 5)")
+    @test !(3 ∈ i"[(2, 2), 5]")
+    @test !(5 ∈ i"(typemax(Int), +∞)")
+
+    # A dense element type reads the limits with their openness in place of stepping them.
+    @test 5.0 ∈ i"[1.0, 9.0]"
+    @test !(1.0 ∈ i"(1.0, 9.0)")
+    @test !(NaN ∈ i"[1.0, 9.0]") # a value the order relates to nothing is a member of nothing
+    @test 5.0 ∈ i"[(1.0, 3.0), 7.0]"
+    @test !(0.5 ∈ i"[(1.0, 3.0), 7.0]")
+    @test ismissing(2.0 ∈ i"[(1.0, 3.0), 7.0]")
+    # Non-empty, and still no value belongs to every interval its endpoints allow.
+    @test ismissing(2.0 ∈ i"((0.0, 2.0), [2.0, 3.0])")
+
+    # A limit that steps beyond the element type leaves the answer open, as it does for `isempty`.
+    @test ismissing(5 ∈ i"([1, typemax(Int)], typemax(Int)]")
+    @test typemax(Int) ∈ i"[typemax(Int), +∞)"
+
+    # Certain bounds decide, so a `Bool` reaches the caller.
+    @test (@inferred 5 ∈ i"[1, 9]") === true
+    @test (@inferred 5.0 ∈ i"(1.0, 9.0)") === true
+end
+
 @testset "Normalization" begin
     @test isequal(normalize(i"(3, 7)"), i"[4, 6]")
     @test isequal(normalize(i"[4, 6]"), i"[4, 6]")

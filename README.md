@@ -46,6 +46,9 @@ isempty(i"[3, 1]")            # true
 isempty(i"[(3, 5), 1]")       # true, every possible left endpoint exceeds the right one
 isempty(i"[(1, 3), 2]")       # false, over `Int` the uncertainty pins the left endpoint to 2
 isempty(i"[(1.0, 3.0), 2.0]") # missing, the left endpoint may fall on either side of 2.0
+
+9 in i"[(1, 9), 20]"          # true, every possible left endpoint stays below 9
+5 in i"[(1, 9), 20]"          # missing, a left endpoint of 8 would leave 5 out
 ```
 
 Such answers are `Union{Bool, Missing}`. Certain endpoints always decide, so those keep returning a `Bool` and stay usable as a condition.

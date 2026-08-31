@@ -435,6 +435,39 @@ end
 # Help inference when emptiness is determined.
 @inline Base.isempty(x::InnerInterval)::Bool = @invoke isempty(x::AInterval)
 
+# A value lies above a lower limit, or below an upper one, where an open limit keeps its own value out.
+@inline above(v, w, closed::Bool) = closed ? w <= v : w < v
+@inline below(v, w, closed::Bool) = closed ? v <= w : v < w
+
+"""
+    in(v, x::AInterval)
+
+Determine whether `v` is a member of `x`.
+
+The answer is `true` or `false` where every endpoint `x` can take agrees on it, and `missing` where they differ, so `5 in i"[(1, 9), 20]"` is `missing` while `9 in i"[(1, 9), 20]"` is `true`.
+"""
+@inline function Base.in(v, x::AInterval{T})::Union{Bool, Missing} where T
+    if isdiscrete(T)
+        # Move every open limit inwards to compare closed limits.
+        ll, rr = extreme_limits(T, @∃ canonical_widest(x) false)
+        # `!<=` rather than `>`, as a value that compares with nothing is no member either.
+        (ll <= v && v <= rr) || return false
+        lr, rl = extreme_limits(T, @∃ canonical_narrowest(x) missing)
+        # An endpoint with no value to take leaves the interval with no members.
+        (ll <= lr && rl <= rr) || return false
+        return lr <= v && v <= rl ? true : missing
+    else
+        (; ₍, l, r, ₎) = x
+        (bound_isempty(l) || bound_isempty(r)) && return false
+        # The widest limits hold every value that any endpoint could let in, the narrowest ones only those that every endpoint does.
+        above(v, l.l, isclosed(l.₍) && isclosed(₍)) && below(v, r.r, isclosed(r.₎) && isclosed(₎)) || return false
+        return above(v, l.r, isopen(l.₎) || isclosed(₍)) && below(v, r.l, isopen(r.₍) || isclosed(₎)) ? true : missing
+    end
+end
+
+# Help inference where every endpoint is certain.
+@inline Base.in(v, x::InnerInterval)::Bool = @invoke in(v, x::AInterval)
+
 # A limit at infinity is the one that cannot be reached, so it is the one that stays open.
 @inline canonical_left_openness(::NegativeInfinity) = LeftOpen
 @inline canonical_left_openness(_) = LeftClosed
