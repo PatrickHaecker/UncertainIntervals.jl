@@ -284,11 +284,6 @@ Base.isequal(x::AInterval{T1,O1ₗ,O1ᵣ}, y::AInterval{T2,O2ₗ,O2ᵣ}) where {
 
 Base.hash(x::AInterval{T,Oₗ,Oᵣ}, h::UInt) where {T,Oₗ,Oᵣ} = hash_all(h, T, Oₗ, Oᵣ, x.left, x.right)
 
-# `Infinities` gives its infinities no `hash` (2026-08-30) and Base's `Real` fallback needs a `decompose` they lack, so fill the gap only while it is one.
-# Only the two singletons, as `Float64` overflows the stack for any further subtype of `RealInfinity`, and every float infinity hashes alike so the width is immaterial.
-which(hash, Tuple{Union{NegativeInfinity, PositiveInfinity}, UInt}) === which(hash, Tuple{Real, UInt}) &&
-    @eval Base.hash(x::Union{NegativeInfinity, PositiveInfinity}, h::UInt) = hash(Float64(x), h)
-
 """
     isdiscrete(T::Type)
 

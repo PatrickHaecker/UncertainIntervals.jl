@@ -11,7 +11,7 @@ using Aqua, JET
 end
 
 @testset "Aqua" begin
-    # `Inner{T}` is a type of this package, and the gated `hash` fills a gap in `Infinities` for as long as the gap is there.
+    # `Inner{T}` is a type of this package, and `LeftInner{T}` and `RightInner{T}` add an infinity to it, which the check reads as another package's.
     Aqua.test_all(UncertainIntervals; unbound_args = false,
         piracies = (; treat_as_own = [Inner, NegativeInfinity, PositiveInfinity]))
 
@@ -26,10 +26,7 @@ end
 end
 
 @testset "JET" begin
-    # These two index with the `nothing` from `findfirst`, which `_tryparse` guards against. Everything else stays in scope, `Base` included.
-    upstream = (which(tryparse, Tuple{Type{NegativeInfinity}, AbstractString}),
-                which(tryparse, Tuple{Type{PositiveInfinity}, AbstractString}))
-    JET.test_package(UncertainIntervals; ignored_modules = JET.LastFrameMethod.(upstream))
+    JET.test_package(UncertainIntervals)
 end
 
 # Test basic interval construction

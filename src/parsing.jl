@@ -97,20 +97,6 @@ function split_comparison(f, str::AbstractString)
     return nothing
 end
 
-# Handed in for upstreaming: https://github.com/JuliaMath/Infinities.jl/pull/76
-"""
-    _tryparse(::Type{RealInfinity}, s::AbstractString)
-
-Return the infinity `s` denotes, or `nothing` if it denotes none. A bare `∞` is the positive one, as only that is a valid bound on its own.
-"""
-function _tryparse(::Type{RealInfinity}, s::AbstractString)
-    all(isspace, s) && return nothing
-    negative = tryparse(NegativeInfinity, s)
-    isnothing(negative) || return negative
-    return tryparse(PositiveInfinity, s)
-end
-
-
 # The parametric `Type{C}` position makes this specialize on the comparison, which a plain closure argument would not.
 """
     tryparse_bound(::Type{C}, ::Type{T}, bound::AbstractString)
@@ -224,7 +210,7 @@ Return the expression an interval in `print` format stands for. A bound which is
 """
 function interval_expr(str::AbstractString)
     s = strip(str)
-    @∃⏎ _tryparse(RealInfinity, s) # the value goes into the expression, so no name has to resolve in the caller's module
+    @∃⏎ tryparse(RealInfinity, s) # the value goes into the expression, so no name has to resolve in the caller's module
     expr = split_comparison(s) do Cmp, rest
         :($Cmp($(interval_expr(rest))))
     end
