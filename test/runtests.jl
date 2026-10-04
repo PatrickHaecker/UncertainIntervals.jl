@@ -474,6 +474,22 @@ end
     @test isequal(simplify(i">5"), simplify(i"[6, typemax(Int)]")) # so `simplify` decides `==` again
 end
 
+@testset "Certain endpoint" begin
+    # A discrete bound pins its endpoint down once only one value lies within it, whatever the spelling.
+    @test certain_endpoint(i"(2, 4)") == 3
+    @test certain_endpoint(i"(2, 3]") == 3
+    @test certain_endpoint(i"[3, 3]") == 3
+    @test ismissing(certain_endpoint(i"(2, 5)"))
+    @test ismissing(certain_endpoint(i"(3, 4)"))                             # empty
+    @test ismissing(certain_endpoint(i"(typemax(Int), typemax(Int)]"))       # no closed lower limit
+    @test certain_endpoint(5) == 5
+
+    # A dense bound needs both limits closed on the same value.
+    @test certain_endpoint(i"[2.0, 2.0]") == 2.0
+    @test ismissing(certain_endpoint(i"(2.0, 3.0)"))
+    @test ismissing(certain_endpoint(i"(2.0, 2.0]"))
+end
+
 @testset "Equality" begin
     # `==` asks about the members, so over a discrete element type different spellings agree.
     @test i"(3, 7)" == i"[4, 6]"
