@@ -5,6 +5,11 @@ using Infinities: NegativeInfinity, PositiveInfinity, RealInfinity, ∞
 
 include("openness.jl")
 include("interval.jl")
+include("stepping.jl")
+include("ordinals.jl")
+include("clamping.jl")
+include("predicates.jl")
+include("normalize.jl")
 include("hashing.jl")
 include("parsing.jl")
 

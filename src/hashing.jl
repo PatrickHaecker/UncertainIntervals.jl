@@ -1,3 +1,10 @@
+# Every pair of intervals needs a method, as `isequal` would otherwise fall back on `==` and inherit set identity.
+Base.isequal(x::AInterval{T1,O1ₗ,O1ᵣ}, y::AInterval{T2,O2ₗ,O2ᵣ}) where {T1,O1ₗ,O1ᵣ,T2,O2ₗ,O2ᵣ} =
+    T1 === T2 && O1ₗ === O2ₗ && O1ᵣ === O2ᵣ && isequal(x.left, y.left) && isequal(x.right, y.right)
+# Machine numbers compare so cheaply that comparing both bounds beats branching after the first.
+Base.isequal(x::AInterval{T,Oₗ,Oᵣ}, y::AInterval{T,Oₗ,Oᵣ}) where {T <: Union{Base.IEEEFloat, Base.BitInteger}, Oₗ, Oᵣ} =
+    isequal(x.left, y.left) & isequal(x.right, y.right)
+
 # The type parameters fold into a single constant, leaving only the limits to hash at runtime.
 Base.hash(x::AInterval{T,Oₗ,Oᵣ}, h::UInt) where {T,Oₗ,Oᵣ} = hash(x.right, hash(x.left, h + hash((T, Oₗ, Oᵣ))))
 

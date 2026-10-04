@@ -235,3 +235,12 @@ Construct an `Interval` written the way it is printed. Each bound is a Julia exp
 macro i_str(str::String)
     str |> interval_expr |> esc
 end
+
+
+# …
+# …₍
+# …₎
+# …₍₎(l::L, r::R) where {L,R}
+
+# 2 …⁽ 4
+# 2 …₍ 4
