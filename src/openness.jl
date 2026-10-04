@@ -27,8 +27,8 @@ isclosed(::Closed) = true
 isclosed(::Open) = false
 
 Base.tryparse(O::typeunion(Openness), c::AbstractChar) = c == Char(O) ? O() : nothing
-Base.tryparse(::Type{LeftOpenness}, c::AbstractChar) = @∃⏎ tryparse(LeftOpen, c) tryparse(LeftClosed, c)
-Base.tryparse(::Type{RightOpenness}, c::AbstractChar) = @∃⏎ tryparse(RightOpen, c) tryparse(RightClosed, c)
+Base.tryparse(::Type{LeftOpenness}, c::AbstractChar) = @⏎∃ tryparse(LeftOpen, c) tryparse(LeftClosed, c)
+Base.tryparse(::Type{RightOpenness}, c::AbstractChar) = @⏎∃ tryparse(RightOpen, c) tryparse(RightClosed, c)
 Base.parse(O::Union{typeunion(LeftOpenness; whole = true), typeunion(RightOpenness; whole = true)}, c::AbstractChar) = @something tryparse(O, c) no_parse(O, c)
 
 Base.print(io::IO, O::typeunion(Openness)) = print(io, O |> Char)

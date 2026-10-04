@@ -233,57 +233,6 @@ Base.show(io::IO, ::MIME"text/plain", x::AInterval) = print(io, x)
 
 Base.eltype(::Type{<:Interval{T}}) where T = T
 
-# `==` asks whether both hold the same members, so it answers `missing` wherever an uncertain endpoint leaves that open. `isequal` and `hash` stay structural and `Bool`, which `Dict` and `Set` need.
-# A member is an order class, so the canonical bounds are compared with the order rather than with `==` on the values. That keeps the answer well defined for an element type whose `==` disagrees with its order.
-# A differing element type falls through to the `===` fallback, as equal bounds do not mean equal contents: `(1, 2)` holds no `Int` where `(1.0, 2.0)` holds values by default.
-# The `===` fallback compares representations, which `BigInt` and `BigFloat` bounds fail to share between equal values.
-@inline order_equal(a, b) = a <= b && b <= a
-@inline same_openness(::AInterval{<:Any,O1ₗ,O1ᵣ}, ::AInterval{<:Any,O2ₗ,O2ᵣ}) where {O1ₗ,O1ᵣ,O2ₗ,O2ᵣ} = O1ₗ == O2ₗ && O1ᵣ == O2ᵣ
-
-# No member lies between an extreme of the element type and the infinity beyond it, so the two name the same limit. A type without extremes keeps its infinities.
-@inline extreme_limit(::Type, v) = v
-@inline extreme_limit(::Type{T}, v::NegativeInfinity) where T = Base.hastypemax(T) ? typemin(T) : v
-@inline extreme_limit(::Type{T}, v::PositiveInfinity) where T = Base.hastypemax(T) ? typemax(T) : v
-@inline extreme_limits(::Type{T}, limits::NamedTuple) where T = map(v -> extreme_limit(T, v), limits)
-
-# The single value a bound stands for, or `missing` where its uncertainty leaves a choice.
-@inline endpoint(b) = b
-@inline function endpoint(b::AInterval)
-    (; l, ₍, r, ₎) = limits(b)
-    return order_equal(l, r) && isclosed(₍) && isclosed(₎) ? l : missing
-end
-
-function Base.:(==)(x::AInterval{T}, y::AInterval{T})::Union{Bool, Missing} where T
-    empty_x, empty_y = isempty(x), isempty(y)
-    (ismissing(empty_x) || ismissing(empty_y)) && return missing
-    empty_x && return empty_y # every empty interval holds the same nothing
-    empty_y && return false
-
-    return if isdiscrete(T)
-        # Both hold a value, so no limit runs out of the element type.
-        xll, xlr, xrl, xrr = extreme_limits(T, something(canonical(x)))
-        yll, ylr, yrl, yrr = extreme_limits(T, something(canonical(y)))
-        # Equality can't be determined if any endpoint is uncertain.
-        order_equal(xll, xlr) && order_equal(xrl, xrr) && order_equal(yll, ylr) && order_equal(yrl, yrr) || return missing
-        # The intervals are equal if their canonical minimum and maximum agree.
-        order_equal(xll, yll) && order_equal(xrr, yrr)
-    else
-        xl, xr = @✓(endpoint(x.left)), @✓(endpoint(x.right))
-        yl, yr = @✓(endpoint(y.left)), @✓(endpoint(y.right))
-        same_openness(x, y) && order_equal(xl, yl) && order_equal(xr, yr)
-    end
-end
-
-# Every pair of intervals needs a method, as `isequal` would otherwise fall back on `==` and inherit set identity.
-Base.isequal(x::AInterval{T1,O1ₗ,O1ᵣ}, y::AInterval{T2,O2ₗ,O2ᵣ}) where {T1,O1ₗ,O1ᵣ,T2,O2ₗ,O2ᵣ} =
-    T1 === T2 && O1ₗ === O2ₗ && O1ᵣ === O2ᵣ && isequal(x.left, y.left) && isequal(x.right, y.right)
-
-# `hash` takes the seed last, but a vararg has to come last, so the seed leads here.
-@inline hash_all(h::UInt) = h
-@inline hash_all(h::UInt, v, vs...) = hash_all(hash(v, h), vs...)
-
-Base.hash(x::AInterval{T,Oₗ,Oᵣ}, h::UInt) where {T,Oₗ,Oᵣ} = hash_all(h, T, Oₗ, Oᵣ, x.left, x.right)
-
 """
     isdiscrete(T::Type)
 
@@ -298,6 +247,36 @@ isdiscrete(::Type{T}) where T = hasmethod(successor, Tuple{T})
 isdiscrete(::Type{Union{}}) = "`Union{}` has no values that could be neighbors" |> ArgumentError |> throw
 
 """
+    inc(x)
+
+Return `x` one unit up, wrapping around at `typemax` like any integer `+`. See also [`dec`](@ref).
+"""
+@inline inc(x) = x + oneunit(x)
+
+"""
+    dec(x)
+
+Return `x` one unit down, wrapping around at `typemin` like any integer `-`. See also [`inc`](@ref).
+"""
+@inline dec(x) = x - oneunit(x)
+
+"""
+    widen_signed(x)
+
+Return `x` in the next wider signed type, so a step either way of it neither wraps around nor drops below an unsigned zero.
+"""
+@inline widen_signed(x) = signed(widen(x))
+
+"""
+    widens(T::Type)
+
+Determine whether a step of the machine integer type `T` is cheaper in the next wider signed type than as [`Shifted`](@ref).
+
+That holds below 32 bits, as measured on x86 with AVX2. Loops over many intervals vectorize with one interval per lane of a 256-bit register. 64-bit lanes are available, but hold half as many values, need a sign extension first, and compare in three cycles at one per cycle (`vpcmpgtq`), where 32-bit lanes compare in one cycle at two per cycle. `Shifted` keeps the lanes at 32 bits for a few cheap extra operations.
+"""
+@inline widens(::Type{T}) where T = sizeof(T) < 4
+
+"""
     successor(x::T)::Union{Nothing, T}
 
 Return the neighbor above `x`, or `nothing` if `x`'s type holds no larger value.
@@ -310,10 +289,9 @@ Defining this method is what makes `T` discrete, so define [`predecessor`](@ref)
 - `predecessor(x) < x < successor(x)`.
 - `predecessor(successor(x)) == x` wherever both exist (=not `nothing`).
 
-`T` itself needs `isless` and `==`. Where `Base.hastypemax(T)` holds, a limit at infinity names that extreme, so `>5` and `[6, typemax(T)]` hold the same members.
+`T` itself needs `isless`, and `==`, too, unless `===` already compares its values.
 """
-(successor(x::T)::Union{Nothing, T}) where T <: Integer = Base.hastypemax(T) && x == typemax(x) ? nothing : x + oneunit(x)
-# An infinite bound is its own neighbor in either direction, as it already lies beyond every value.
+(successor(x::T)::Union{Nothing, T}) where T <: Integer = Base.hastypemax(T) && x == typemax(x) ? nothing : inc(x)
 successor(x::Union{NegativeInfinity, PositiveInfinity}) = x
 
 """
@@ -323,8 +301,24 @@ Return the neighbor below `x`, or `nothing` if `x`'s type holds no smaller value
 
 Every type with a [`successor`](@ref) needs this method too, under the contract stated there.
 """
-(predecessor(x::T)::Union{Nothing, T}) where T <: Integer = Base.hastypemax(T) && x == typemin(x) ? nothing : x - oneunit(x)
+(predecessor(x::T)::Union{Nothing, T}) where T <: Integer = Base.hastypemax(T) && x == typemin(x) ? nothing : dec(x)
 predecessor(x::Union{NegativeInfinity, PositiveInfinity}) = x
+
+"""
+    step_up(v)
+
+Return a value that compares like [`successor(v)`](@ref successor), and where there is none, one that is no smaller than `v`.
+
+The result is only fit for comparing, as a machine integer steps like in [`closed_ordinal`](@ref) instead of checking for its `typemax`. See also [`step_down`](@ref).
+"""
+@inline step_up(v) = v isa Base.BitInteger ? (widens(typeof(v)) ? inc(widen_signed(v)) : Shifted(v, 1)) : something(successor(v), v)
+
+"""
+    step_down(v)
+
+Return a value that compares like [`predecessor(v)`](@ref predecessor), and where there is none, one that is no larger than `v`. See [`step_up`](@ref).
+"""
+@inline step_down(v) = v isa Base.BitInteger ? (widens(typeof(v)) ? dec(widen_signed(v)) : Shifted(v, -1)) : something(predecessor(v), v)
 
 """
     respell(::Type{T}, v, from::Openness, to::Openness)
@@ -351,122 +345,415 @@ julia> respell(Int, 3, LeftClosed(), LeftOpen())  # `[3` and `(2` are the same l
 @inline respell(::Type, v::AInterval, from::LeftOpenness, to::LeftOpenness) = from == to ? v : nothing
 @inline respell(::Type, v::AInterval, from::RightOpenness, to::RightOpenness) = from == to ? v : nothing
 
-# The closed spelling of a limit, which a bound's limit reaches in two steps: once as the bound's own limit and once as the interval's.
-@inline inwards(::Type{T}, v, o::LeftOpenness) where T = respell(T, v, o, LeftClosed())
-@inline inwards(::Type{T}, v, o::RightOpenness) where T = respell(T, v, o, RightClosed())
-@inline inwards(::Type{T}, v, o::Openness, p::Openness) where T = inwards(T, @∃(inwards(T, v, o)), p)
+"""
+    closed(T, v, o...)
+
+Return the closed limit equivalent to `v` with the opennesses `o`, or `nothing` where `T` has no such value.
+
+Each open `o` moves `v` one step inwards. Pass the openness of the endpoint's uncertainty first, then the interval's, so `((3, 4), 9]` over `Int` starts at `closed(Int, 3, LeftOpen(), LeftOpen()) == 5`.
+"""
+@inline closed(::Type{T}, v, o::LeftOpenness) where T = respell(T, v, o, LeftClosed())
+@inline closed(::Type{T}, v, o::RightOpenness) where T = respell(T, v, o, RightClosed())
+@inline closed(::Type{T}, v, o::Openness, p::Openness) where T = closed(T, @∃(closed(T, v, o)), p)
+
+@inline inward(w, o::LeftOpenness) = isopen(o) ? inc(w) : w
+@inline inward(w, o::RightOpenness) = isopen(o) ? dec(w) : w
+
+@inline offset(o::LeftOpenness) = isopen(o) ? 1 : 0
+@inline offset(o::RightOpenness) = isopen(o) ? -1 : 0
 
 """
-    canonical_widest(x::AInterval)::Union{Nothing, NamedTuple{(:ll, :rr)}}
+    Shifted{T}(v, s)
 
-Return the limits of the widest interval `x` can be given its uncertainty.
+The value `v` shifted by `s` steps, compared like `v + s` without computing it, so no step runs out of the values of `T`.
+
+In an [`Interval`](@ref), a limit steps at most twice, once where the uncertainty of the endpoint is open and once where the interval is open, so `s` lies in `-2:2`. In `((1, 3), 7]` over `Int`, the open uncertainty `(1, 3)` makes the lowest left endpoint `2`, and the open interval makes its lowest member `3`, `1` stepped twice.
 """
-@inline function canonical_widest(x::AInterval{T})::Union{Nothing, NamedTuple{(:ll, :rr)}} where T
+struct Shifted{T <: Base.BitInteger}
+    v::T
+    s::Int
+end
+
+# `a <= b` means `a.v - b.v <= b.s - a.s`. The shifts are small, but `a.v - b.v` can wrap around in `T`.
+# Read as unsigned, the wrapped difference is still the true one wherever that is not negative, and `a.v <= b.v` tells which case holds.
+# So a comparison gives the sign and the wrapped difference the size, without widening `T`.
+@inline function Base.:(<=)(a::Shifted{T}, b::Shifted{T}) where T <: Base.BitInteger
+    d = b.s - a.s
+    if d >= 0 # branch-free for `.s` only depending on type parameters like `Openness`
+        return (a.v <= b.v) | ((a.v - b.v) % unsigned(T) <= d)
+    else
+        return (a.v < b.v) & ((b.v - a.v) % unsigned(T) >= -d)
+    end
+end
+# `a == b` means `a.v - b.v == d`. Wrapped in `T`, a true difference of `d ± 2^N` matches as well, but has another sign than `d`.
+@inline function Base.:(==)(a::Shifted{T}, b::Shifted{T}) where T <: Base.BitInteger
+    d = b.s - a.s
+    return ((a.v - b.v) % unsigned(T) == d % unsigned(T)) & (cmp(a.v, b.v) == sign(d))
+end
+@inline Base.:(<)(a::Shifted{T}, b::Shifted{T}) where T <: Base.BitInteger = !(b <= a)
+for op in (:(==), :(<=), :(<))
+    @eval @inline Base.$op(a::Shifted{T}, v::T) where T <: Base.BitInteger = $op(a, Shifted{T}(v, 0))
+    @eval @inline Base.$op(v::T, a::Shifted{T}) where T <: Base.BitInteger = $op(Shifted{T}(v, 0), a)
+end
+@inline Base.:(<=)(a::Shifted, v::Real) = widen_signed(a.v) + a.s <= v
+@inline Base.:(<=)(v::Real, a::Shifted) = v <= widen_signed(a.v) + a.s
+
+"""
+    closed_ordinal(T, v, o...)
+
+Return an *ordinal* for the limit `v` with openness `o`: a value that sorts exactly like the closed limit `closed(T, v, o...)`, but need not be of type `T`. Return `nothing` only where `T` is no machine integer and the closed limit does not exist.
+
+Sorting is all that `isempty`, `in` and `⊆` need, and for a machine integer an ordinal exists even where the closed limit does not:
+
+```jldoctest
+julia> using UncertainIntervals: closed, closed_ordinal, LeftOpen
+
+julia> closed_ordinal(Int8, Int8(3), LeftOpen()) == Int8(4)  # `(3` is `[4`
+true
+
+julia> closed(Int8, typemax(Int8), LeftOpen())  # `nothing`, as `(127` has no closed limit in `Int8`
+
+julia> closed_ordinal(Int8, typemax(Int8), LeftOpen()) > typemax(Int8)  # but its ordinal sorts above every `Int8`
+true
+```
+
+An ordinal is no limit, though, and need not even be a number, so never store one in an interval. [`widens`](@ref) picks the representation for a machine integer.
+"""
+@inline closed_ordinal(::Type{T}, v, o::Openness...) where T =
+    T <: Base.BitInteger ?
+        widens(T) ? foldl(inward, o; init = widen_signed(v)) : Shifted{T}(v, sum(offset, o)) :
+        closed(T, v, o...)
+
+"""
+    widest_ordinals(x::AInterval)::Union{Nothing, Tuple{Any, Any}}
+
+Return `(ll, rr)`, ordinals for the lowest left and the highest right endpoint `x` can take, the limits of the widest interval it may be, or `nothing` where one of them has no ordinal. See [`closed_ordinal`](@ref).
+"""
+@inline function widest_ordinals(x::AInterval{T})::Union{Nothing, Tuple{Any, Any}} where T
     (; ₍, l, r, ₎) = x
-    ll = @∃ inwards(T, l.l, l.₍, ₍)
-    rr = @∃ inwards(T, r.r, r.₎, ₎)
-    return (; ll, rr)
+    ll = @∃ closed_ordinal(T, l.l, l.₍, ₍)
+    rr = @∃ closed_ordinal(T, r.r, r.₎, ₎)
+    return ll, rr
 end
 
 """
-    canonical_narrowest(x::AInterval)::Union{Nothing, NamedTuple{(:lr, :rl)}}
+    narrowest_ordinals(x::AInterval)::Union{Nothing, Tuple{Any, Any}}
 
-Return the limits of the narrowest interval `x` can be given its uncertainty.
+Return `(lr, rl)`, ordinals for the highest left and the lowest right endpoint `x` can take, the limits of the narrowest interval it may be, or `nothing` where one of them has no ordinal. See [`closed_ordinal`](@ref).
 """
-@inline function canonical_narrowest(x::AInterval{T})::Union{Nothing, NamedTuple{(:lr, :rl)}} where T
+@inline function narrowest_ordinals(x::AInterval{T})::Union{Nothing, Tuple{Any, Any}} where T
     (; ₍, l, r, ₎) = x
-    lr = @∃ inwards(T, l.r, l.₎, ₍)
-    rl = @∃ inwards(T, r.l, r.₍, ₎)
-    return (; lr, rl)
+    lr = @∃ closed_ordinal(T, l.r, l.₎, ₍)
+    rl = @∃ closed_ordinal(T, r.l, r.₍, ₎)
+    return lr, rl
 end
 
 """
-    canonical(x::AInterval)::Union{Nothing, NamedTuple{(:ll, :lr, :rl, :rr)}}
+    canonical(x::AInterval)::Union{Nothing, Tuple{Tuple{Any, Any}, Tuple{Any, Any}}}
 
-Return the four limits of `x` given its uncertainty.
+Return `((ll, lr), (rl, rr))`, the closed limits each endpoint of `x` can take, lowest first, or `nothing` where one of them has no closed equivalent in the element type.
 """
-@inline function canonical(x::AInterval{T})::Union{Nothing, NamedTuple{(:ll, :lr, :rl, :rr)}} where T
+@inline function canonical(x::AInterval{T})::Union{Nothing, Tuple{Tuple{Any, Any}, Tuple{Any, Any}}} where T
     (; ₍, l, r, ₎) = x
-    (; ll, rr) = @∃ canonical_widest(x)
-    lr = @∃ narrowest_upper(T, inwards(T, l.r, l.₎, ₍), rr)
-    rl = @∃ narrowest_lower(T, inwards(T, r.l, r.₍, ₎), ll)
-    return (; ll, lr, rl, rr)
+    ll = @∃ closed(T, l.l, l.₍, ₍)
+    rr = @∃ closed(T, r.r, r.₎, ₎)
+    lr = @∃ narrowest_upper(T, closed(T, l.r, l.₎, ₍), rr)
+    rl = @∃ narrowest_lower(T, closed(T, r.l, r.₍, ₎), ll)
+    return (ll, lr), (rl, rr)
 end
 
 # A step out of the element type drops the one endpoint that reaches beyond it, and that endpoint leaves `x` empty. The extreme stands in for it wherever a kept endpoint leaves `x` empty as well, which keeps every possible member set.
 @inline narrowest_upper(::Type{T}, v, rr) where T = isnothing(v) && Base.hastypemax(T) && rr < typemax(T) ? typemax(T) : v
 @inline narrowest_lower(::Type{T}, v, ll) where T = isnothing(v) && Base.hastypemax(T) && typemin(T) < ll ? typemin(T) : v
 
-# A bound whose own limits conflict leaves no value for the endpoint.
-@inline bound_isempty((; l, ₍, r, ₎)) = !(l <= r) || l == r && (isopen(₍) || isopen(₎))
+"""
+    linemin(::Type{T})::Union{Nothing, T}
+
+Return the smallest member of `Line{T}()`, or `nothing` if it has none.
+
+So `≤b` and `[linemin(T), b]` hold the same members. See also [`linemax`](@ref).
+"""
+@inline function linemin(::Type{T}) where T
+    # This assumes that `hastypemin` would have the same result as `hastypemax`.
+    Base.hastypemax(T) || return nothing
+    m = typemin(T)
+    return m == -∞ ? (isdiscrete(T) ? successor(m) : nothing) : m
+end
+
+"""
+    linemax(::Type{T})::Union{Nothing, T}
+
+Return the largest member of `Line{T}()`, or `nothing` if it has none.
+
+So `≥a` and `[a, linemax(T)]` hold the same members. See also [`linemin`](@ref).
+"""
+@inline function linemax(::Type{T}) where T
+    Base.hastypemax(T) || return nothing
+    m = typemax(T)
+    return m == +∞ ? (isdiscrete(T) ? predecessor(m) : nothing) : m
+end
+
+"""
+    clamp_lower(T, v)
+
+Return [`linemin(T)`](@ref linemin) in place of `v == -∞` where there is one, else `v`. [`unclamp_lower`](@ref) undoes it.
+"""
+@inline clamp_lower(::Type{T}, v) where T = v isa NegativeInfinity ? something(linemin(T), v) : v
+
+"""
+    clamp_upper(T, v)
+
+Return [`linemax(T)`](@ref linemax) in place of `v == +∞` where there is one, else `v`. [`unclamp_upper`](@ref) undoes it.
+"""
+@inline clamp_upper(::Type{T}, v) where T = v isa PositiveInfinity ? something(linemax(T), v) : v
+
+"""
+    clamp_infinities(x)
+
+Replace each infinity in `x` by the extreme value of its element type, if there is one, so `≥5` becomes `[5, typemax(Int)]`, while `≥big(5)` stays as it is, as `BigInt` has no largest value.
+
+Once inlined, the new interval usually folds away.
+"""
+@inline clamp_infinities(v) = v
+@inline function clamp_infinities(x::AInterval{T,Oₗ,Oᵣ,L,R}) where {T,Oₗ,Oᵣ,L,R}
+    l, r = clamp_lower(T, clamp_infinities(x.left)), clamp_upper(T, clamp_infinities(x.right))
+    Lₒ = L === NegativeInfinity && !(l isa NegativeInfinity) ? LeftClosed : Oₗ
+    Rₒ = R === PositiveInfinity && !(r isa PositiveInfinity) ? RightClosed : Oᵣ
+    return Interval{T, Lₒ, Rₒ, typeof(l), typeof(r)}(l, r)
+end
+
+# Unlike `>` and `>=`, these also hold for values that do not compare at all, such as `NaN`.
+@inline ≰(a, b) = !(a <= b)
+@inline ≮(a, b) = !(a < b)
+
+"""
+    isemptybound(b)::Bool
+
+Determine whether the bound `b` is empty, as `(3, 3)` is. Like `isempty`, except that a plain value is never empty, whatever `isempty` says about it.
+"""
+@inline isemptybound(_) = false
+@inline isemptybound(b::InnerInterval) = isempty(b)
 
 """
     isempty(x::AInterval)
 
 Determine whether the interval contains no value.
 
-If emptiness is determined, the function returns `true` or `false`. Otherwise, it returns `missing`.
+Return `true` if `x` is certainly empty, `false` if it is certainly nonempty, and `missing` otherwise.
 """
-@inline function Base.isempty(x::AInterval{T})::Union{Bool, Missing} where T
+@inline Base.isempty(x::AInterval) = isempty_clamped(clamp_infinities(x))
+
+@inline function isempty_clamped(x::AInterval{T})::Union{Bool, Missing} where T
     if isdiscrete(T)
         # Move every open limit inwards to compare closed limits.
-        ll, rr = extreme_limits(T, @∃ canonical_widest(x) true)
-        # `!<=` rather than `>`, as a limit that compares with nothing leaves no member either.
-        @⊤⏎ !(ll <= rr)
-        # A narrowest limit that steps out of the element type only shows that some endpoint empties `x`.
-        lr, rl = extreme_limits(T, @∃ canonical_narrowest(x) missing)
-        # An endpoint with no value to take leaves the interval with no members.
-        @⊤⏎ !(ll <= lr) || !(rl <= rr)
+        ll, rr = @∃ widest_ordinals(x) true
+        @⏎⊤ ll ≰ rr
+        # A narrowest limit beyond `T` leaves `x` possibly empty, and certainly empty if a bound is empty.
+        lr, rl = @∃ narrowest_ordinals(x) (isemptybound(x.left) || isemptybound(x.right) ? true : missing)
+        # An empty bound leaves `x` certainly empty.
+        @⏎⊤ ll ≰ lr || rl ≰ rr
         return lr <= rl ? false : missing
     else
         (; ₍, l, r, ₎) = x
-        # any open side keeps a single shared endpoint out
-        any_open = isopen(₍) || isopen(₎)
-        # Use `!<=` instead of `>` to get the correct `missing` for non-comparing bounds like `NaN`.
-        empty = bound_isempty(l) || bound_isempty(r) ||
-            !(l.l <= r.r) || l.l == r.r && (isopen(l.₍) || isopen(r.₎) || any_open)
-        nonempty = l.r < r.l || l.r == r.l && (!any_open || isopen(l.₎) || isopen(r.₍))
-
-        # Only an empty bound satisfies both, and there `empty` is the one that answers.
-        return empty || nonempty ? empty : missing
+        # A single shared endpoint is a member only where both sides of `x` are closed.
+        ⪯ʷ = isclosed(l.₍) && isclosed(₍) && isclosed(₎) && isclosed(r.₎) ? (<=) : (<)
+        ⪯ⁿ = isopen(l.₎) || isclosed(₍) && isclosed(₎) || isopen(r.₍) ? (<=) : (<)
+        certainly_empty = isemptybound(x.left) || isemptybound(x.right) || !(l.l ⪯ʷ r.r)
+        certainly_nonempty = l.r ⪯ⁿ r.l
+        known = certainly_empty || certainly_nonempty
+        return known ? certainly_empty : missing
     end
 end
 
-# Help inference when emptiness is determined.
-@inline Base.isempty(x::InnerInterval)::Bool = @invoke isempty(x::AInterval)
+@inline function Base.isempty(x::InnerInterval{T})::Bool where T
+    (; left, ₍, right, ₎) = clamp_infinities(x)
+    isclosed(₍) && isclosed(₎) && return left ≰ right
+    isdiscrete(T) && isopen(₍) && isopen(₎) && return step_up(left) ≮ right
+    return left ≮ right
+end
 
-# A value lies above a lower limit, or below an upper one, where an open limit keeps its own value out.
-@inline above(v, w, closed::Bool) = closed ? w <= v : w < v
-@inline below(v, w, closed::Bool) = closed ? v <= w : v < w
+"""
+    certain_endpoint(b)
+
+Return the only value the bound `b` allows for its endpoint, or `missing` if it allows none or several.
+
+The discrete intervals `(2, 4)` and `(2, 3]` contain only `3`. A dense one needs `[v, v]` to contain a single value.
+"""
+@inline certain_endpoint(b) = b
+@inline function certain_endpoint(b::AInterval{T}) where T
+    (; l, ₍, r, ₎) = limits(b)
+    lo, hi = closed(T, l, ₍), closed(T, r, ₎)
+    return !isnothing(lo) && lo == hi ? lo : missing
+end
+
+# Test for member equality.
+@inline Base.:(==)(x::AInterval{T}, y::AInterval{T}) where T = equal_clamped(clamp_infinities(x), clamp_infinities(y))
+
+@inline function equal_clamped(x::AInterval{T}, y::AInterval{T})::Union{Bool, Missing} where T
+    empty_x, empty_y = isempty(x), isempty(y)
+    (ismissing(empty_x) || ismissing(empty_y)) && return missing
+    empty_x && return empty_y # every empty interval holds the same nothing
+    empty_y && return false
+
+    return if isdiscrete(T)
+        # Ordinals compare like the closed limits, and for a machine integer they exist even where those do not, so the fallback folds away.
+        xll, xrr = @∃ widest_ordinals(x) missing
+        xlr, xrl = @∃ narrowest_ordinals(x) missing
+        yll, yrr = @∃ widest_ordinals(y) missing
+        ylr, yrl = @∃ narrowest_ordinals(y) missing
+        # Equality can't be determined if any endpoint is uncertain.
+        (xll == xlr) & (xrl == xrr) & (yll == ylr) & (yrl == yrr) || return missing
+        # The intervals are equal if their canonical minimum and maximum agree.
+        (xll == yll) & (xrr == yrr)
+    else
+        xl = @■ certain_endpoint(x.left)
+        xr = @■ certain_endpoint(x.right)
+        yl = @■ certain_endpoint(y.left)
+        yr = @■ certain_endpoint(y.right)
+        # `&` keeps machine floats branch-free where not inlined, `&&` skips the remaining comparisons for expensive types.
+        T <: Base.IEEEFloat ?
+            (x.₍ == y.₍) & (x.₎ == y.₎) & (xl == yl) & (xr == yr) :
+            x.₍ == y.₍ && x.₎ == y.₎ && xl == yl && xr == yr
+    end
+end
+
+# Ordinals for the closed equivalents of a certain interval's limits, see `closed_ordinal` and `step_up`.
+@inline left_ordinal(x) = isclosed(x.₍) ? x.left : step_up(x.left)
+@inline right_ordinal(x) = isclosed(x.₎) ? x.right : step_down(x.right)
+
+@inline function equal_clamped(x::InnerInterval{T}, y::InnerInterval{T})::Bool where T
+    # Branchless, as data-dependent branches mispredict.
+    ex, ey = isempty(x), isempty(y)
+    same = isdiscrete(T) ?
+        (left_ordinal(x) == left_ordinal(y)) & (right_ordinal(x) == right_ordinal(y)) :
+        (x.₍ == y.₍) & (x.₎ == y.₎) & (x.left == y.left) & (x.right == y.right)
+    # Where the first term holds, `ex` and `ey` agree, so `ex | same` works without `ey`.
+    return (ex == ey) & (ex | same)
+end
+
+# Every pair of intervals needs a method, as `isequal` would otherwise fall back on `==` and inherit set identity.
+Base.isequal(x::AInterval{T1,O1ₗ,O1ᵣ}, y::AInterval{T2,O2ₗ,O2ᵣ}) where {T1,O1ₗ,O1ᵣ,T2,O2ₗ,O2ᵣ} =
+    T1 === T2 && O1ₗ === O2ₗ && O1ᵣ === O2ᵣ && isequal(x.left, y.left) && isequal(x.right, y.right)
+# Machine numbers compare so cheaply that comparing both bounds beats branching after the first.
+Base.isequal(x::AInterval{T,Oₗ,Oᵣ}, y::AInterval{T,Oₗ,Oᵣ}) where {T <: Union{Base.IEEEFloat, Base.BitInteger}, Oₗ, Oᵣ} =
+    isequal(x.left, y.left) & isequal(x.right, y.right)
 
 """
     in(v, x::AInterval)
 
 Determine whether `v` is a member of `x`.
 
-The answer is `true` or `false` where every endpoint `x` can take agrees on it, and `missing` where they differ, so `5 in i"[(1, 9), 20]"` is `missing` while `9 in i"[(1, 9), 20]"` is `true`.
+The answer is `true` or `false` where every endpoint `x` can take agrees on it, and `missing` where they differ, so `5 in i"[(1, 9), 20]"` is `missing` while `9 in i"[(1, 9), 20]"` is `true`. An unknown `v`, that is `missing`, is only ruled out by a certainly empty `x`.
 """
-@inline function Base.in(v, x::AInterval{T})::Union{Bool, Missing} where T
+@inline Base.in(v, x::AInterval) = in_clamped(v, clamp_infinities(x))
+
+@inline function in_clamped(v, x::AInterval{T})::Union{Bool, Missing} where T
     if isdiscrete(T)
         # Move every open limit inwards to compare closed limits.
-        ll, rr = extreme_limits(T, @∃ canonical_widest(x) false)
+        ll, rr = @∃ widest_ordinals(x) false
         # `!<=` rather than `>`, as a value that compares with nothing is no member either.
         (ll <= v && v <= rr) || return false
-        lr, rl = extreme_limits(T, @∃ canonical_narrowest(x) missing)
-        # An endpoint with no value to take leaves the interval with no members.
+        lr, rl = @∃ narrowest_ordinals(x) (isemptybound(x.left) || isemptybound(x.right) ? false : missing)
+        # An empty bound certainly keeps `v` out.
         (ll <= lr && rl <= rr) || return false
         return lr <= v && v <= rl ? true : missing
     else
         (; ₍, l, r, ₎) = x
-        (bound_isempty(l) || bound_isempty(r)) && return false
-        # The widest limits hold every value that any endpoint could let in, the narrowest ones only those that every endpoint does.
-        above(v, l.l, isclosed(l.₍) && isclosed(₍)) && below(v, r.r, isclosed(r.₎) && isclosed(₎)) || return false
-        return above(v, l.r, isopen(l.₎) || isclosed(₍)) && below(v, r.l, isopen(r.₍) || isclosed(₎)) ? true : missing
+        (isemptybound(x.left) || isemptybound(x.right)) && return false
+        # The widest limits hold every possible member, the narrowest ones only the certain members.
+        ⪰₍ʷ = isclosed(l.₍) && isclosed(₍) ? (>=) : (>)
+        ⪯₎ʷ = isclosed(r.₎) && isclosed(₎) ? (<=) : (<)
+        ⪰₍ⁿ = isopen(l.₎) || isclosed(₍) ? (>=) : (>)
+        ⪯₎ⁿ = isopen(r.₍) || isclosed(₎) ? (<=) : (<)
+        v ⪰₍ʷ l.l && v ⪯₎ʷ r.r || return false
+        return v ⪰₍ⁿ l.r && v ⪯₎ⁿ r.l ? true : missing
     end
 end
 
-# Help inference where every endpoint is certain.
-@inline Base.in(v, x::InnerInterval)::Bool = @invoke in(v, x::AInterval)
+# Branchless where every endpoint is certain. A discrete limit only moves inwards for a value of its own type.
+@inline function Base.in(v, x::InnerInterval{T})::Bool where T
+    v isa T || !isdiscrete(T) || return @invoke in(v, x::AInterval)
+    (; left, ₍, right, ₎) = clamp_infinities(x)
+    ⪰₍ = isclosed(₍) ? (>=) : (>)
+    ⪯₎ = isclosed(₎) ? (<=) : (<)
+    return (v ⪰₍ left) & (v ⪯₎ right)
+end
+
+# The second method settles the ambiguity with `in(v, ::InnerInterval)`.
+@inline Base.in(::Missing, x::AInterval) = isempty(x) === true ? false : missing
+@inline Base.in(::Missing, x::InnerInterval) = isempty(x) ? false : missing
+
+"""
+    certainly_within(x::AInterval, y::AInterval)::Bool
+
+Determine whether `x ⊆ y` holds whichever endpoints `x` and `y` take, that is whether the widest limits of `x` lie within the narrowest limits of `y`.
+
+Neither `x` nor `y` may be certainly empty. `[7, 3]` is certainly empty, `[[1, 9], 5]` is not, as only some of its left endpoints leave it empty.
+"""
+@inline function certainly_within(x::AInterval{T}, y::AInterval{T})::Bool where T
+    if isdiscrete(T)
+        xll, xrr = @∃ widest_ordinals(x) true
+        ylr, yrl = @∃ narrowest_ordinals(y) false
+        return xll >= ylr && xrr <= yrl
+    else
+        # A shared limit belongs to `y` wherever `y` is closed at it or `x` never reaches it.
+        ⪰₍ = isopen(y.l.₎) || isclosed(y.₍) || isopen(x.l.₍) || isopen(x.₍) ? (>=) : (>)
+        ⪯₎ = isopen(y.r.₍) || isclosed(y.₎) || isopen(x.r.₎) || isopen(x.₎) ? (<=) : (<)
+        return x.l.l ⪰₍ y.l.r && x.r.r ⪯₎ y.r.l
+    end
+end
+
+"""
+    possibly_within(x::AInterval, y::AInterval)::Bool
+
+Determine whether `x ⊆ y` holds for some endpoints `x` and `y` can take, that is whether the narrowest limits of `x` lie within the widest limits of `y`.
+
+`x` must be certainly non-empty, as `[1, 9]` is and `[[1, 9], 5]` is not, and `y` must not be certainly empty, see [`certainly_within`](@ref).
+"""
+@inline function possibly_within(x::AInterval{T}, y::AInterval{T})::Bool where T
+    if isdiscrete(T)
+        xlr, xrl = @∃ narrowest_ordinals(x) true
+        yll, yrr = @∃ widest_ordinals(y) false
+        return xlr >= yll && xrl <= yrr
+    end
+    # A limit can be shared at all only where both endpoints attain it.
+    ⪰₍ = isclosed(x.l.₎) && isclosed(y.l.₍) && (isclosed(y.₍) || isopen(x.₍)) ? (>=) : (>)
+    ⪯₎ = isclosed(x.r.₍) && isclosed(y.r.₎) && (isclosed(y.₎) || isopen(x.₎)) ? (<=) : (<)
+    return x.l.r ⪰₍ y.l.l && x.r.l ⪯₎ y.r.r
+end
+
+"""
+    issubset(x::AInterval, y::AInterval)
+
+Determine whether every member of `x` is a member of `y`.
+
+Return `missing` where the possible endpoints disagree. So `i"[1, 2]" ⊆ i"[[1, 3], 7]"` is `missing`, but `i"[1, 2]" ⊆ i"[(1, 3), 7]"` is `false`, as an integer endpoint in `(1, 3)` can only be `2`.
+
+An empty interval is a subset of every interval, and only an empty one is a subset of an empty interval.
+"""
+@inline Base.issubset(x::AInterval{T}, y::AInterval{T}) where T = issubset_clamped(clamp_infinities(x), clamp_infinities(y))
+
+@inline function issubset_clamped(x::AInterval{T}, y::AInterval{T})::Union{Bool, Missing} where T
+    empty_x = isempty(x)
+    empty_x === true && return true # a certainly empty `x` asks nothing of `y`
+    # A certainly empty `y` has room for nothing, and an empty bound turns the limits around that the readings below rely on.
+    isempty(y) === true && return empty_x === false ? false : missing
+
+    certainly_within(x, y) && return true
+    return empty_x === false && !possibly_within(x, y) ? false : missing
+end
+
+# Branchless where every endpoint is certain. The closed limits are only reliable where both intervals hold a value.
+@inline function issubset_clamped(x::InnerInterval{T}, y::InnerInterval{T})::Bool where T
+    within = if isdiscrete(T)
+        (left_ordinal(x) >= left_ordinal(y)) & (right_ordinal(x) <= right_ordinal(y))
+    else
+        ⪰₍ = isopen(x.₍) | isclosed(y.₍) ? (>=) : (>)
+        ⪯₎ = isopen(x.₎) | isclosed(y.₎) ? (<=) : (<)
+        (x.left ⪰₍ y.left) & (x.right ⪯₎ y.right)
+    end
+    return isempty(x) | !isempty(y) & within
+end
 
 # A limit at infinity is the one that cannot be reached, so it is the one that stays open.
 @inline canonical_left_openness(::NegativeInfinity) = LeftOpen
@@ -474,7 +761,7 @@ end
 @inline canonical_right_openness(::PositiveInfinity) = RightOpen
 @inline canonical_right_openness(_) = RightClosed
 
-# A limit one step beyond the element type has no closed spelling, which only `normalize` has to answer for.
+# A limit one step beyond the element type has no closed equivalent, which only `normalize` has to answer for.
 @noinline no_canonical(x::AInterval{T}) where T = "`$x` has no canonical form, as a limit steps beyond `$T`" |> ArgumentError |> throw
 
 """
@@ -490,22 +777,44 @@ Every bound keeps the shape it had, so the result type follows from the argument
 """
 @inline function normalize(x::Interval{T}) where T
     isdiscrete(T) || return x
-    (; ll, lr, rl, rr) = @something canonical(x) no_canonical(x)
+    (ll, lr), (rl, rr) = @something canonical(x) no_canonical(x)
     left, right = canonical_bound(x.left, ll, lr), canonical_bound(x.right, rl, rr)
     return Interval{T, canonical_left_openness(left), canonical_right_openness(right), typeof(left), typeof(right)}(left, right)
 end
 
-# Taking the shape from the bound that is already there keeps every type independent of the values.
+"""
+    canonical_bound(b, lo, hi)
+
+Return the bound `b` rebuilt from its canonical limits as `[lo, hi]`, open only at an infinity, or as `lo` where `b` is a plain value.
+
+An uncertain `b` stays an interval even where `lo == hi`, as in `[[3, 3], 7]`, so the result type follows from the type of `b` alone.
+"""
 @inline canonical_bound(::AInterval, lo, hi) = Interval{canonical_left_openness(lo), canonical_right_openness(hi)}(lo, hi)
 @inline canonical_bound(_, lo, _) = lo
 
-# The other end of `extreme_limit`: the same limit spelled as the infinity beyond the extreme, which is the spelling no element type outgrows.
-@inline infinite_lower(::Type{T}, v) where T = Base.hastypemax(T) && v == typemin(T) ? -∞ : v
-@inline infinite_upper(::Type{T}, v) where T = Base.hastypemax(T) && v == typemax(T) ? +∞ : v
+"""
+    unclamp_lower(T, v)
+
+Return `-∞` where `v` is [`linemin(T)`](@ref linemin), else `v`, which undoes [`clamp_lower`](@ref).
+"""
+@inline function unclamp_lower(::Type{T}, v) where T
+    e = linemin(T)
+    return !isnothing(e) && v == e ? -∞ : v
+end
+
+"""
+    unclamp_upper(T, v)
+
+Return `+∞` where `v` is [`linemax(T)`](@ref linemax), else `v`, which undoes [`clamp_upper`](@ref).
+"""
+@inline function unclamp_upper(::Type{T}, v) where T
+    e = linemax(T)
+    return !isnothing(e) && v == e ? +∞ : v
+end
 
 # An endpoint that could take any value is the line over the element type.
 @inline function simplified_bound(::Type{T}, lo, hi) where T
-    l, h = infinite_lower(T, lo), infinite_upper(T, hi)
+    l, h = unclamp_lower(T, lo), unclamp_upper(T, hi)
     return l isa NegativeInfinity && h isa PositiveInfinity ? Line{T}() :
         Interval{canonical_left_openness(l), canonical_right_openness(h)}(l, h)
 end
@@ -517,17 +826,24 @@ Return the canonical form of `x` with every uncertainty that is down to a single
 
 So `((1, 3), 7]` becomes `[3, 7]`, where [`normalize`](@ref) stops at `[[3, 3], 7]`. A limit at an extreme of the element type becomes the infinity beyond it, so `[5, typemax(Int)]` becomes `≥5`, which `normalize` leaves alone, and an endpoint that could take any value becomes `Line{T}()`.
 
-Both take the same limits, but where none of them has a closed spelling, as for `([1, typemax(Int)], typemax(Int)]`, this call returns `x` unchanged rather than throwing as `normalize` does.
+Both take the same limits, but where none of them has a closed equivalent, as for `([1, typemax(Int)], typemax(Int)]`, this call returns `x` unchanged rather than throwing as `normalize` does.
 
 Whether a bound collapses follows from the values rather than from the types, so the result type is not inferable and the call allocates. Reach for `normalize` wherever that matters.
 """
 function simplify(x::Interval{T,Oₗ,Oᵣ}) where {T,Oₗ,Oᵣ}
-    # A dense element type has no limits to move, but a bound can still be down to one value.
-    isdiscrete(T) || return Interval{T,Oₗ,Oᵣ}(coalesce(endpoint(x.left), x.left), coalesce(endpoint(x.right), x.right))
-    (; ll, lr, rl, rr) = @something canonical(x) return x
-    left = ll == lr ? infinite_lower(T, ll) : simplified_bound(T, ll, lr)
-    right = rl == rr ? infinite_upper(T, rr) : simplified_bound(T, rl, rr)
-    return Interval{T, canonical_left_openness(left), canonical_right_openness(right), typeof(left), typeof(right)}(left, right)
+    if isdiscrete(T)
+        (ll, lr), (rl, rr) = @something canonical(x) return x
+        l = ll == lr ? unclamp_lower(T, ll) : simplified_bound(T, ll, lr)
+        r = rl == rr ? unclamp_upper(T, rr) : simplified_bound(T, rl, rr)
+        Lₒ, Rₒ = LeftClosed, RightClosed
+    else
+        # Only a closed bound at the extreme reaches the infinity, as an open one leaves the extreme out.
+        lo, hi = certain_endpoint(x.left), certain_endpoint(x.right)
+        l = ismissing(lo) ? x.left : isclosed(Oₗ()) ? unclamp_lower(T, lo) : lo
+        r = ismissing(hi) ? x.right : isclosed(Oᵣ()) ? unclamp_upper(T, hi) : hi
+        Lₒ, Rₒ = Oₗ, Oᵣ
+    end
+    return Interval{T, l isa NegativeInfinity ? LeftOpen : Lₒ, r isa PositiveInfinity ? RightOpen : Rₒ, typeof(l), typeof(r)}(l, r)
 end
 
 # …

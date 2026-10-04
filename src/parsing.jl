@@ -1,5 +1,7 @@
-# ASCII delimiters can be found byte-wise, as every non-ASCII UTF-8 byte is `>= 0x80`. Wider code units are rejected rather than misread.
-@inline utf8(s::AbstractString) = codeunits(s)::Base.CodeUnits{UInt8}
+# The strings parsed here. Their code units are bytes, so the ASCII delimiters can be found byte-wise, as every non-ASCII UTF-8 byte is `>= 0x80`. Any other string converts with `String(s)`.
+const ByteString = Union{String, SubString{String}}
+
+@inline utf8(s::ByteString) = codeunits(s)
 
 # A quote right after a value is the adjoint operator, which is how Julia reads it too: https://github.com/JuliaLang/julia/blob/ba658ebd8c246bc3f3489586a89073b337b501f9/JuliaSyntax/src/julia/tokenize.jl#L1108
 @inline value_byte(b::UInt8) =
@@ -7,11 +9,11 @@
     b in (UInt8('_'), UInt8('.'), UInt8(')'), UInt8(']'), UInt8('}'), UInt8('\''), UInt8('"'))
 
 """
-    comma_index(s::AbstractString)
+    comma_index(s::ByteString)
 
 Return the index of the comma separating the two bounds of `s`, which is an interval already stripped of its enclosing brackets, or `nothing` where `s` does not hold exactly one such comma. Commas of nested bounds and of any call in between are skipped, so a remaining enclosing bracket would hide the wanted one a level deep. A bracket or comma inside a character or string literal is text and counts for nothing.
 """
-function comma_index(s::AbstractString)::Union{Nothing, Int}
+function comma_index(s::ByteString)::Union{Nothing, Int}
     index = 0 # no index of its own, so it stands for the comma still missing
     depth = 0
     units = utf8(s)
@@ -47,7 +49,7 @@ end
 # Packing the pair lets a two-byte prefix be compared in one step, and the little-endian order matches a two-byte load on a little-endian host.
 """
     leading_pair(u::AbstractVector{UInt8})
-    leading_pair(s::AbstractString)
+    leading_pair(s::ByteString)
 
 Return the two leading bytes of `u` as one little-endian `UInt16`.
 """
@@ -55,15 +57,15 @@ Base.@propagate_inbounds function leading_pair(u::AbstractVector{UInt8})
     @boundscheck checkbounds(u, firstindex(u) : firstindex(u) + 1)
     @inbounds UInt16(u[begin]) | UInt16(u[begin + 1]) << 8
 end
-Base.@propagate_inbounds leading_pair(s::AbstractString) = s |> codeunits |> leading_pair
+Base.@propagate_inbounds leading_pair(s::ByteString) = s |> codeunits |> leading_pair
 
 # Passing `f` in avoids materializing a tuple, which a `Union` with `nothing` would force onto the heap.
 """
-    split_interval(f, str::AbstractString)
+    split_interval(f, str::ByteString)
 
 Return `f` applied to the left `Openness`, the right `Openness` and the two bounds of `str`, which is an interval in `print` format such as `"[1, 2)"`. The bounds are handed over as substrings, so their meaning is left to `f`. A `str` of a different form gives `nothing` and leaves `f` uncalled.
 """
-function split_interval(f, str::AbstractString)
+function split_interval(f, str::ByteString)
     s = strip(str)
     @⊤ ncodeunits(s) >= ncodeunits("(a,b)")
     left_openness = @∃ tryparse(LeftOpenness, s |> first)
@@ -77,11 +79,11 @@ end
 
 # Each branch hands over one fixed comparison, which keeps `f` specialized where a loop over the comparisons would leave the type to be applied at run time.
 """
-    split_comparison(f, str::AbstractString)
+    split_comparison(f, str::ByteString)
 
 Return `f` applied to the comparison type `str` begins with and to the rest of `str`. A `str` beginning with no comparison gives `nothing` and leaves `f` uncalled.
 """
-function split_comparison(f, str::AbstractString)
+function split_comparison(f, str::ByteString)
     s = strip(str)
     units = utf8(s)
     @⊥ isempty(s)
@@ -106,12 +108,12 @@ Return the comparison `C` over `bound` parsed as `T`, or `nothing` if `bound` is
 @inline tryparse_bound(::Type{C}, ::Type{T}, bound::AbstractString) where {C,T} = C(@∃ tryparse(T, bound))
 
 for Cmp in Comparisons
-    @eval @inline Base.tryparse(::Type{<:$Cmp{T}}, str::AbstractString) where T = split_comparison(str) do Spelled, rest
+    @eval @inline Base.tryparse(::Type{<:$Cmp{T}}, str::ByteString) where T = split_comparison(str) do Spelled, rest
         Spelled === $Cmp ? tryparse_bound($Cmp, T, rest) : nothing
     end
 end
 
-function Base.tryparse(::Type{<:Comparison{T}}, str::AbstractString) where T
+function Base.tryparse(::Type{<:Comparison{T}}, str::ByteString) where T
     split_comparison(str) do Cmp, rest
         tryparse_bound(Cmp, T, rest)
     end
@@ -128,14 +130,14 @@ end
     return OpenClosedRegular{T}(left, right) # or at least efficiently handle this – but it can't with Julia 1.13, although this is the least inefficient
 end
 
-function Base.tryparse(::Type{<:CertainInterval{T}}, str::AbstractString) where T
+function Base.tryparse(::Type{<:CertainInterval{T}}, str::ByteString) where T
     split_interval(str) do left_openness, right_openness, left_str, right_str
         parse_certain_interval(T, left_openness, right_openness, left_str, right_str)
     end
 end
 
 # A target which pins the openness leaves a single type, so it is built directly and an input of another openness is rejected. `typeunion` matches those four types invariantly, where a `<:` bound would also cover their union and lose to the method above.
-@inline function Base.tryparse(R::typeunion(CertainInterval{T}), str::AbstractString) where T
+@inline function Base.tryparse(R::typeunion(CertainInterval{T}), str::ByteString) where T
     split_interval(str) do left_openness, right_openness, left_str, right_str
         @⊤ R <: Interval{T, typeof(left_openness), typeof(right_openness)}
         left = @∃ tryparse(T, left_str)
@@ -146,11 +148,11 @@ end
 
 # Not a `tryparse` method, as `Line{T}` and the comparisons meet where `T` is itself an infinity.
 """
-    tryparse_line(::Type{T}, str::AbstractString)
+    tryparse_line(::Type{T}, str::ByteString)
 
-Return the line over `T` if `str` spells it, and `nothing` otherwise. Only a bound reaches this, as an interval of its own takes the element type from nowhere and `Line{T}()` names it instead.
+Return the line over `T` if `str` spells it, and `nothing` otherwise.
 """
-function tryparse_line(::Type{T}, str::AbstractString) where T
+function tryparse_line(::Type{T}, str::ByteString) where T
     split_interval(str) do left_openness, right_openness, left_str, right_str
         @⊤ isopen(left_openness) && isopen(right_openness)
         @∃ tryparse(NegativeInfinity, left_str)
@@ -159,27 +161,27 @@ function tryparse_line(::Type{T}, str::AbstractString) where T
     end
 end
 
-function Base.tryparse(::Type{Inner{T}}, s::AbstractString) where T
-    @∃⏎ tryparse(T, s)
-    @∃⏎ tryparse(Comparison{T}, s)
-    @∃⏎ tryparse_line(T, s)
+function Base.tryparse(::Type{Inner{T}}, s::ByteString) where T
+    @⏎∃ tryparse(T, s)
+    @⏎∃ tryparse(Comparison{T}, s)
+    @⏎∃ tryparse_line(T, s)
     tryparse(CertainInterval{T}, s)
 end
 
-function Base.tryparse(::Type{LeftInner{T}}, s::AbstractString) where T
-    @∃⏎ tryparse(Inner{T}, s)
+function Base.tryparse(::Type{LeftInner{T}}, s::ByteString) where T
+    @⏎∃ tryparse(Inner{T}, s)
     tryparse(NegativeInfinity, s)
 end
 
-function Base.tryparse(::Type{RightInner{T}}, s::AbstractString) where T
-    @∃⏎ tryparse(Inner{T}, s)
+function Base.tryparse(::Type{RightInner{T}}, s::ByteString) where T
+    @⏎∃ tryparse(Inner{T}, s)
     tryparse(PositiveInfinity, s)
 end
 
-function Base.tryparse(::Type{<:Interval{T}}, str::AbstractString) where T
+function Base.tryparse(::Type{<:Interval{T}}, str::ByteString) where T
     s = strip(str)
 
-    @∃⏎ tryparse(Comparison{T}, s)
+    @⏎∃ tryparse(Comparison{T}, s)
 
     split_interval(s) do left_openness, right_openness, left_str, right_str
         left = @∃ tryparse(LeftInner{T}, left_str)
@@ -192,25 +194,25 @@ end
 @noinline no_parse(::Type{R}, x) where R = "`$x` spells no `$(sprint(show, R))`" |> ArgumentError |> throw
 
 """
-    parse(::Type{R}, s::AbstractString)
+    parse(::Type{R}, s::ByteString)
 
 Return the `R` that `s` spells, and throw an `ArgumentError` where it spells none. Which spellings there are is what `tryparse` says.
 """
-Base.parse(::Type{R}, s::AbstractString) where R <: AInterval = @something tryparse(R, s) no_parse(R, s)
+Base.parse(::Type{R}, s::ByteString) where R <: AInterval = @something tryparse(R, s) no_parse(R, s)
 
 # A bound is a `Union` holding the element type itself, which no `<:` bound of a type parameter matches.
 for I in (Inner, LeftInner, RightInner)
-    @eval Base.parse(::Type{$I{T}}, s::AbstractString) where T = @something tryparse($I{T}, s) no_parse($I{T}, s)
+    @eval Base.parse(::Type{$I{T}}, s::ByteString) where T = @something tryparse($I{T}, s) no_parse($I{T}, s)
 end
 
 """
-    interval_expr(str::AbstractString)
+    interval_expr(str::ByteString)
 
 Return the expression an interval in `print` format stands for. A bound which is no interval itself is handed to Julia verbatim, so it can be any expression, except for a vector, which no bound can be.
 """
-function interval_expr(str::AbstractString)
+function interval_expr(str::ByteString)
     s = strip(str)
-    @∃⏎ tryparse(RealInfinity, s) # the value goes into the expression, so no name has to resolve in the caller's module
+    @⏎∃ tryparse(RealInfinity, s) # the value goes into the expression, so no name has to resolve in the caller's module
     expr = split_comparison(s) do Cmp, rest
         :($Cmp($(interval_expr(rest))))
     end

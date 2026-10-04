@@ -1,5 +1,6 @@
 using Test
 using UseAll
+using Dates
 using Infinities
 using Aqua, JET
 
@@ -16,12 +17,12 @@ end
         piracies = (; treat_as_own = [Inner, NegativeInfinity, PositiveInfinity]))
 
     # Julia does solve `T` out of `Type{Inner{T}}`, which the check cannot see. Anything else unbound still fails.
-    bounds = (which(tryparse, Tuple{Type{Inner{Int}}, AbstractString}),
-              which(tryparse, Tuple{Type{LeftInner{Int}}, AbstractString}),
-              which(tryparse, Tuple{Type{RightInner{Int}}, AbstractString}),
-              which(parse, Tuple{Type{Inner{Int}}, AbstractString}),
-              which(parse, Tuple{Type{LeftInner{Int}}, AbstractString}),
-              which(parse, Tuple{Type{RightInner{Int}}, AbstractString}))
+    bounds = (which(tryparse, Tuple{Type{Inner{Int}}, String}),
+              which(tryparse, Tuple{Type{LeftInner{Int}}, String}),
+              which(tryparse, Tuple{Type{RightInner{Int}}, String}),
+              which(parse, Tuple{Type{Inner{Int}}, String}),
+              which(parse, Tuple{Type{LeftInner{Int}}, String}),
+              which(parse, Tuple{Type{RightInner{Int}}, String}))
     @test issubset(Aqua.detect_unbound_args_recursively(UncertainIntervals), bounds)
 end
 
@@ -155,6 +156,11 @@ end
     @test_throws ArgumentError parse(OpenRegular{Int}, "[1, 2]")
     @test_throws ArgumentError parse(LeftInner{Int}, "+∞")
 
+    # Only `String`s and their substrings are read, anything else converts first.
+    @test parse(ClosedRegular{Int}, SubString("x[1, 2]", 2)) === ClosedClosed(1, 2)
+    @test_throws MethodError tryparse(Interval{Int}, Test.GenericString("[1, 2]"))
+    @test parse(ClosedRegular{Int}, String(Test.GenericString("[1, 2]"))) === ClosedClosed(1, 2)
+
     # A single bracket names an openness, where the failure is the same one.
     @test parse(LeftOpenness, '(') === LeftOpen()
     @test parse(RightClosed, ']') === RightClosed()
@@ -224,6 +230,11 @@ UncertainIntervals.predecessor(x::Fuzzy) = Fuzzy(prevfloat(x.v))
     @test ismissing(isempty(i"[3, [-9, 4])"))
     @test ismissing(isempty(i"[3, [typemin(Int), 4])"))
 
+    # A bound whose own open limit steps off the type holds no value, so no endpoint is left to take.
+    @test isempty(ClosedClosed(OpenOpen(1, typemin(Int)), 9))
+    @test isempty(ClosedClosed(1, OpenOpen(typemax(Int), 9)))
+    @test isempty(OpenOpen(ClosedClosed(3, typemax(Int)), ClosedClosed(9, 5))) # the other bound is empty
+
     # An extreme of the element type meeting a bound at infinity.
     @test !isempty(i"[typemin(Int), typemax(Int)]")
     @test !isempty(i"(typemin(Int), typemax(Int))")
@@ -286,6 +297,9 @@ end
     @test 5.0 ∈ i"[1.0, 9.0]"
     @test !(1.0 ∈ i"(1.0, 9.0)")
     @test !(NaN ∈ i"[1.0, 9.0]") # a value the order relates to nothing is a member of nothing
+    # `NaN` compares false against an infinite limit too, so it stays out even between two of them.
+    @test !(NaN ∈ i"≥1.0")
+    @test !(NaN ∈ Line{Float64}())
     @test 5.0 ∈ i"[(1.0, 3.0), 7.0]"
     @test !(0.5 ∈ i"[(1.0, 3.0), 7.0]")
     @test ismissing(2.0 ∈ i"[(1.0, 3.0), 7.0]")
@@ -294,11 +308,91 @@ end
 
     # A limit that steps beyond the element type leaves the answer open, as it does for `isempty`.
     @test ismissing(5 ∈ i"([1, typemax(Int)], typemax(Int)]")
+    @test !(5 ∈ ClosedClosed(OpenOpen(1, typemin(Int)), 9))
+    @test !(5 ∈ ClosedClosed(1, OpenOpen(typemax(Int), 9)))
     @test typemax(Int) ∈ i"[typemax(Int), +∞)"
 
     # Certain bounds decide, so a `Bool` reaches the caller.
     @test (@inferred 5 ∈ i"[1, 9]") === true
     @test (@inferred 5.0 ∈ i"(1.0, 9.0)") === true
+
+    # An unknown value, as in `Base`, is only ruled out by an interval that certainly holds nothing.
+    @test ismissing(missing ∈ i"[1, 9]")
+    @test ismissing(missing ∈ i"[1.0, 9.0]")
+    @test ismissing(missing ∈ i"[(1, 9), 20]")
+    @test ismissing(missing ∈ i"[[1, 9], 5]") # possibly empty
+    @test !(missing ∈ i"[5, 3]")
+    @test !(missing ∈ i"[(2, 2), 5]")
+end
+
+@testset "Subset" begin
+    @test i"[1, 2]" ⊆ i"[1, 3]"
+    @test i"[1, 2]" ⊆ i"[1, 2]"
+    @test i"[1, 3]" ⊈ i"[1, 2]"
+    @test i"(1, 9)" ⊆ i"[1, 9]"
+    @test i"[1, 9]" ⊈ i"(1, 9)"
+    @test i"[1, 2]" ⊆ Line{Int}()
+    @test Line{Int}() ⊈ i"[1, 2]"
+    @test i"[1, 2]" ⊇ i"[2, 2]" # `⊇` is `⊆` with the arguments swapped
+    @test i"[1, 2]" ⊉ i"[1, 3]" # and `⊉` negates that one
+    @test ismissing(i"[1, 2]" ⊈ i"[[1, 3], 7]") # a negation leaves an undecided answer undecided
+
+    # A discrete element type reads both spellings of a limit as one, so `==` and `⊆` agree.
+    @test i"(3, 7)" ⊆ i"[4, 6]"
+    @test i"[4, 6]" ⊆ i"(3, 7)"
+    @test i"≥5" ⊆ i">4"
+    @test i">4" ⊆ i"≥5"
+
+    # Every pair of endpoints the two can take has to agree.
+    @test ismissing(i"[1, 2]" ⊆ i"[[1, 3], 7]") # a left endpoint of 2 keeps 1 out, one of 1 does not
+    @test ismissing(i"[2, 3]" ⊆ i"[[1, 3], 7]")
+    @test i"[4, 5]" ⊆ i"[[1, 3], 7]"
+    @test i"[0, 5]" ⊈ i"[[1, 3], 7]"
+    @test ismissing(i"[2, >4]" ⊆ i"[1, 9]") # a right endpoint above 9 leaves `y`
+    @test i"[2, >4]" ⊆ Line{Int}()
+
+    # Over a discrete element type an open bound can pin the endpoint, which decides the answer.
+    @test i"[1, 2]" ⊈ i"[(1, 3), 7]" # `(1, 3)` leaves the left endpoint no choice but 2
+    @test i"[2, 2]" ⊆ i"[(1, 3), 7]"
+
+    # An interval that could be empty is a subset wherever its non-empty readings are.
+    @test i"[[1, 9], 5]" ⊆ i"[1, 5]"
+    @test ismissing(i"[[1, 9], 5]" ⊆ i"[3, 5]") # a left endpoint of 1 leaves `y`
+    @test ismissing(i"[[1, 9], 5]" ⊆ i"[6, 9]") # only the empty readings fit
+
+    # An empty interval asks nothing of the other one, and takes nothing in.
+    @test i"[5, 3]" ⊆ i"[1, 2]"
+    @test i"(5, 5)" ⊆ i"[5, 3]"
+    @test i"[1, 2]" ⊈ i"[5, 3]"
+    @test i"[1, 2]" ⊈ i"[(2, 2), 5]"     # a bound with no value to take
+    @test i"[3.0, 4.0]" ⊈ i"[(2.0, 2.0), 5.0]"
+    @test i"[1.0, 2.0]" ⊈ i"[NaN, NaN]"  # `NaN` compares with nothing, so the interval holds nothing
+    @test i"[NaN, NaN]" ⊆ i"[1.0, 2.0]"
+
+    # A dense element type reads the limits with their openness in place of stepping them.
+    @test i"(1.0, 9.0)" ⊆ i"[1.0, 9.0]"
+    @test i"[1.0, 9.0]" ⊈ i"(1.0, 9.0)"
+    @test i"[4.0, 5.0]" ⊆ i"[(1.0, 3.0), 7.0]"
+    @test i"[1.0, 2.0]" ⊈ i"[(1.0, 3.0), 7.0]" # every left endpoint stays above 1.0
+    @test ismissing(i"[2.0, 2.5]" ⊆ i"[(1.0, 3.0), 7.0]")
+
+    # A limit at infinity names the extreme of a discrete element type, so the two spellings contain each other.
+    @test i">5" ⊆ i"[6, typemax(Int)]"
+    @test i"[6, typemax(Int)]" ⊆ i">5"
+    @test i"((1, typemax(Int)], typemax(Int)]" ⊆ Line{Int}()
+    @test i"[1, 2]" ⊈ i"([1, typemax(Int)], typemax(Int)]" # every left endpoint of `y` sits above 1
+    @test i"[big(1), big(2)]" ⊆ i"[big(0), big(9)]"           # a type without extremes keeps its infinities
+
+    # What separates the two spellings is where the extreme of the element type sits: `Inf` is order-equal to `+∞`, so a bound closed at it holds a member the ray leaves out, while `typemax(Int)` lies below the limit, which leaves nothing between the two. `⊆` pins that down where `==` only keeps them apart.
+    @test i"≥0.0" ⊆ i"[0.0, Inf]"
+    @test i"[0.0, Inf]" ⊈ i"≥0.0"
+    @test i"[0.0, Inf)" ⊆ i"≥0.0"
+    @test i"≥0.0" ⊆ i"[0.0, Inf)"
+
+    # Certain bounds decide, so a `Bool` reaches the caller.
+    @test (@inferred i"[1, 2]" ⊆ i"[1, 3]") === true
+    @test (@inferred i"[1.5, 2.0]" ⊆ i"(1.0, 3.0)") === true
+    @test (@inferred i">4" ⊆ Line{Int}()) === true
 end
 
 @testset "Normalization" begin
@@ -436,10 +530,209 @@ end
     @test !isequal(i">5", i"[6, typemax(Int)]")
     @test Line{BigInt}() != i"[big(1), big(9)]" # without its guard the substitution would reach for `typemin(BigInt)`
 
-    # `Inf` is a value sitting where the limit `+∞` is, so a bound closed at it holds a member that the ray leaves out. A discrete element type reads the extreme and the infinity as one limit instead, and which of the two readings wins is open.
+    # `Inf` is a value sitting where the limit `+∞` is, so a bound closed at it holds a member that the ray leaves out, while an extreme below the limit leaves nothing between the two and merges the spellings. `⊆` pins the difference down: `i"≥0.0" ⊆ i"[0.0, Inf]"` holds and the converse does not.
     @test i"(-Inf, 5.0]" == i"≤5.0"
     @test i"[-Inf, 5.0]" != i"≤5.0"
     @test i"[0.0, Inf]" != i"≥0.0"
+end
+
+# The element types below separate two properties that `Int` and `Float64` happen to tie together: whether the type counts its values, and where its extreme sits relative to the limit beyond it.
+UncertainIntervals.successor(x::Date) = x + Day(1)
+UncertainIntervals.predecessor(x::Date) = x - Day(1)
+# `Time` stays dense, so it is the type that is dense and still has no value at infinity.
+
+# An `Int8` whose extremes stand in for the infinities, with `typemin(Int8)` as a `NaN`. This is the discrete counterpart of `Float64`: a type whose extreme sits *at* the limit rather than below it.
+# An `Integer`, as its finite values are integers. `isfinite` and `isinteger` default to `true` there and have to be overridden, the same pair `Infinities` overrides for `ℵ₀`. Arithmetic is left out, as nothing here asks for it.
+struct ExtInt8 <: Integer
+    v::Int8
+end
+const NAN8 = ExtInt8(typemin(Int8))
+const NEGINF8 = ExtInt8(typemin(Int8) + one(Int8))
+const POSINF8 = ExtInt8(typemax(Int8))
+Base.isnan(x::ExtInt8) = x.v == typemin(Int8)
+Base.isinf(x::ExtInt8) = x == NEGINF8 || x == POSINF8
+Base.isfinite(x::ExtInt8) = !isnan(x) && !isinf(x)
+Base.isinteger(x::ExtInt8) = isfinite(x)
+Base.signbit(x::ExtInt8) = x.v < zero(Int8)
+Base.typemin(::Type{ExtInt8}) = NEGINF8
+Base.typemax(::Type{ExtInt8}) = POSINF8
+Base.isless(a::ExtInt8, b::ExtInt8) = !isnan(a) && !isnan(b) && a.v < b.v
+Base.:(<)(a::ExtInt8, b::ExtInt8) = !isnan(a) && !isnan(b) && a.v < b.v
+Base.:(<=)(a::ExtInt8, b::ExtInt8) = !isnan(a) && !isnan(b) && a.v <= b.v
+Base.:(==)(a::ExtInt8, b::ExtInt8) = !isnan(a) && !isnan(b) && a.v == b.v
+# The infinities and the `NaN` hash as the `Float64` ones do, which is what `==` against them claims.
+Base.hash(x::ExtInt8, h::UInt) = hash(isnan(x) ? NaN : x == POSINF8 ? Inf : x == NEGINF8 ? -Inf : Float64(x.v), h)
+Base.show(io::IO, x::ExtInt8) = print(io, isnan(x) ? "NaN8" : x == NEGINF8 ? "-Inf8" : x == POSINF8 ? "Inf8" : string(x.v))
+UncertainIntervals.successor(x::ExtInt8) = isnan(x) || x == POSINF8 ? nothing : ExtInt8(x.v + one(Int8))
+UncertainIntervals.predecessor(x::ExtInt8) = isnan(x) || x == NEGINF8 ? nothing : ExtInt8(x.v - one(Int8))
+
+# A type carrying the order relations and nothing else. It is deliberately not a `Number`: Base's own `==(x::Number, y::Number)` promotes, so a `Number` owes a promotion rule, arithmetic and a hash, none of which this package asks for.
+struct Approx
+    v::Float64
+end
+Base.:(<)(a::Approx, b::Approx) = a.v < b.v
+Base.:(<=)(a::Approx, b::Approx) = a.v <= b.v
+Base.:(==)(a::Approx, b::Approx) = a.v == b.v
+
+# The discrete counterpart of `Approx`: ordered, with neighbors, and nothing more.
+struct Rung
+    v::Int
+end
+Base.:(<)(a::Rung, b::Rung) = a.v < b.v
+Base.:(<=)(a::Rung, b::Rung) = a.v <= b.v
+Base.:(==)(a::Rung, b::Rung) = a.v == b.v
+UncertainIntervals.successor(x::Rung) = Rung(x.v + 1)
+UncertainIntervals.predecessor(x::Rung) = Rung(x.v - 1)
+
+@testset "Discrete element type without a value at infinity" begin
+    d1, d2 = Date(2024, 3, 1), Date(2024, 3, 8)
+    @test isdiscrete(Date)
+    @test -∞ < d1 < +∞
+    @test isempty(OpenOpen(d1, d1 + Day(1))) # neighbours, so nothing lies between them
+    @test !isempty(OpenOpen(d1, d1 + Day(2)))
+    @test isequal(normalize(OpenOpen(d1, d2)), ClosedClosed(d1 + Day(1), d2 - Day(1)))
+    @test OpenOpen(d1, d2) == ClosedClosed(d1 + Day(1), d2 - Day(1))
+    @test d1 + Day(3) ∈ ClosedClosed(d1, d2)
+    @test ClosedClosed(d1, d2) ⊆ ClosedOpen(d1, d2 + Day(1))
+
+    # An extreme below the limit names the same limit as the infinity beyond it, and the substitution keeps the element type from ever meeting an infinity.
+    @test !isempty(GreaterEqual(d1))
+    @test isempty(Greater(typemax(Date)))
+    @test !isempty(GreaterEqual(typemax(Date)))
+    @test typemax(Date) ∈ GreaterEqual(d1)
+    @test d1 ∈ Line{Date}()
+    @test GreaterEqual(d1) == ClosedClosed(d1, typemax(Date))
+    @test GreaterEqual(d1) ⊆ ClosedClosed(d1, typemax(Date))
+    @test ClosedClosed(d1, typemax(Date)) ⊆ GreaterEqual(d1)
+    @test isequal(simplify(ClosedClosed(d1, typemax(Date))), GreaterEqual(d1))
+end
+
+@testset "Dense element type without a value at infinity" begin
+    t1, t2 = Time(1), Time(2)
+    @test_throws MethodError t1 < +∞ # cyclic Time is deliberately not opted in
+    @test !isdiscrete(Time)
+    @test !isempty(OpenOpen(t1, t2))
+    @test isempty(OpenOpen(t1, t1))
+    @test !isempty(ClosedClosed(t1, t1))
+    @test t1 + Nanosecond(1) ∈ OpenOpen(t1, t2)
+    @test !(t1 ∈ OpenOpen(t1, t2))
+    @test OpenOpen(t1, t2) != ClosedClosed(t1, t2) # no step joins the two spellings
+    @test OpenOpen(t1, t2) ⊆ ClosedClosed(t1, t2)
+    @test isequal(normalize(OpenOpen(t1, t2)), OpenOpen(t1, t2))
+    @test !isempty(Line{Time}())
+
+    # `typemin(Time)` and `typemax(Time)` stand in for the limits, so `Time` never meets an infinity.
+    @test !isempty(GreaterEqual(t1))
+    @test t2 ∈ GreaterEqual(t1)
+    @test t1 ∈ Line{Time}()
+    @test ClosedClosed(t1, t2) ⊆ Line{Time}()
+    @test GreaterEqual(t1) ⊆ Line{Time}()
+
+    # Nothing lies between `typemax(Time)` and the limit either, so these meet as they do over `Date`, although no step reaches from one to the other.
+    @test GreaterEqual(t1) == ClosedClosed(t1, typemax(Time))
+    @test isequal(simplify(ClosedClosed(t1, typemax(Time))), GreaterEqual(t1))
+end
+
+@testset "Discrete element type with a value at infinity" begin
+    a, b = ExtInt8(0), ExtInt8(5)
+    @test isdiscrete(ExtInt8)
+
+    # Declaring the type a `Number` and answering `isinf` is all it takes: `Infinities` derives the rest.
+    @test ExtInt8 <: Integer
+    @test POSINF8 == +∞ && NEGINF8 == -∞
+    @test +∞ == POSINF8 && -∞ == NEGINF8 # symmetric, as `Infinities` answers for both orders
+    @test hash(POSINF8) == hash(∞) && hash(NEGINF8) == hash(-∞) # which is what `==` obliges
+    @test POSINF8 != -∞ && NEGINF8 != +∞
+    @test NAN8 != +∞ && NAN8 != -∞ && b != +∞
+
+    # The predicates agree with one another, which the `Integer` defaults would not.
+    @test isinf(POSINF8) && !isfinite(POSINF8) && !isinteger(POSINF8)
+    @test isfinite(b) && isinteger(b) && !isinf(b) && !isnan(b)
+    @test isnan(NAN8) && !isfinite(NAN8) && !isinf(NAN8)
+
+    @test !isempty(ClosedClosed(a, b))
+    @test isempty(OpenOpen(a, ExtInt8(1)))
+    @test isequal(normalize(OpenOpen(a, b)), ClosedClosed(ExtInt8(1), ExtInt8(4)))
+    @test ExtInt8(3) ∈ ClosedClosed(a, b)
+
+    # A value the order relates to nothing is a member of nothing and holds nothing.
+    @test !(NAN8 ∈ ClosedClosed(a, b))
+    @test !(NAN8 ∈ Line{ExtInt8}())
+    @test isempty(ClosedClosed(NAN8, NAN8))
+    @test isempty(ClosedClosed(a, NAN8))
+
+    # A bound at the extreme is a bound at the limit, so a bound open at the limit stops one value short of it.
+    @test isempty(GreaterEqual(POSINF8))
+    @test isempty(Greater(POSINF8))
+    @test isempty(LessEqual(NEGINF8))
+    @test isempty(Less(NEGINF8))
+    @test !(NEGINF8 ∈ Line{ExtInt8}())
+    @test ExtInt8(126) ∈ Line{ExtInt8}()
+    @test GreaterEqual(a) ⊆ ClosedClosed(a, POSINF8)
+
+    # `Inf8` is a value sitting where the limit is, exactly as `Inf` does over `Float64`, so a bound closed at it holds a member the ray leaves out.
+    @test !(POSINF8 ∈ GreaterEqual(a))
+    @test GreaterEqual(a) != ClosedClosed(a, POSINF8)
+    @test ClosedClosed(a, POSINF8) ⊈ GreaterEqual(a)
+    @test isequal(simplify(ClosedClosed(a, POSINF8)), ClosedClosed(a, POSINF8))
+    @test isequal(simplify(ClosedClosed(a, ExtInt8(126))), GreaterEqual(a)) # the last value below the limit does name it
+end
+
+@testset "Rational carries its own infinities" begin
+    # `Base.isinf` already names `±1//0`, so `Rational` is covered without it saying anything.
+    @test 1//0 == +∞
+    @test -1//0 == -∞
+    @test 1//1 != +∞
+    @test 1//0 != -∞
+    @test -1//0 != +∞
+    @test big(1)//0 == +∞ # a numerator that is not an `Int`
+    @test !isdiscrete(Rational{Int})
+
+    @test !(1//0 ∈ GreaterEqual(0//1)) # the ray is open where `1//0` sits
+    @test 1//0 ∈ ClosedClosed(0//1, 1//0)
+    @test GreaterEqual(0//1) != ClosedClosed(0//1, 1//0)
+    @test GreaterEqual(0//1) ⊆ ClosedClosed(0//1, 1//0)
+    @test ClosedClosed(0//1, 1//0) ⊈ GreaterEqual(0//1)
+    @test isempty(GreaterEqual(1//0)) # nothing lies at the limit and below it at once
+end
+
+@testset "An element type ordered and nothing more" begin
+    # Infinite bounds need direct infinity comparisons unless finite extrema can replace them.
+    a, b = Approx(1.0), Approx(2.0)
+    @test a != +∞ # the `===` fallback, as no method claims otherwise
+    @test a != -∞
+    @test !isdiscrete(Approx)
+    @test !Base.hastypemax(Approx) # so no extreme stands in for a limit and the infinities stay put
+
+    finite = ClosedClosed(a, b)
+    @test !isempty(finite)
+    @test b ∈ finite
+    @test !(Approx(0.0) ∈ finite)
+    @test finite == ClosedClosed(a, b)
+    @test finite ⊆ ClosedClosed(Approx(0.0), b)
+    @test isequal(normalize(finite), finite)
+    @test isequal(simplify(finite), finite)
+    @test_throws MethodError isempty(GreaterEqual(a))
+    @test_throws MethodError b ∈ GreaterEqual(a)
+    @test !isempty(Line{Approx}())
+    @test_throws MethodError a ∈ Line{Approx}()
+end
+
+@testset "A discrete element type ordered and nothing more" begin
+    a, b = Rung(1), Rung(5)
+    @test isdiscrete(Rung)
+    @test !Base.hastypemax(Rung)
+    @test a != +∞
+
+    @test !isempty(ClosedClosed(a, b))
+    @test isempty(OpenOpen(a, Rung(2))) # neighbors, so nothing lies between them
+    @test Rung(3) ∈ OpenOpen(a, b)
+    @test !(a ∈ OpenOpen(a, b))
+    @test OpenOpen(a, b) == ClosedClosed(Rung(2), Rung(4))
+    @test OpenOpen(a, b) ⊆ ClosedClosed(Rung(2), Rung(4))
+    @test isequal(normalize(OpenOpen(a, b)), ClosedClosed(Rung(2), Rung(4)))
+    @test isequal(simplify(ClosedClosed(OpenOpen(Rung(0), Rung(2)), b)), ClosedClosed(Rung(1), b))
+    @test_throws MethodError Rung(3) ∈ GreaterEqual(a)
 end
 
 @testset "Interval Literals" begin
@@ -527,11 +820,18 @@ end
     @test findfirst(RightOpenness, "[1,2)") == 5
 end
 
-# Test macro functionality
-@testset "Macro Functionality" begin
-    @test !isnothing(@∃ 42)
-    @test !isnothing(@⊤ true)
-    @test !isnothing(@⊥ false)
-    @test !ismissing(@✓ 42)
-    @test ismissing(@⍰ missing)
+# Only the macros are imported, so an expansion naming anything of the package by symbol fails here.
+module BareCaller
+import UncertainIntervals: @i_str
+const a, b = 3, 7
+computed() = i"[a + b, 2b]" # the bounds resolve here, everything else must not
+infinite() = i"[4, +∞)"
+nested() = i"[2, >4]"
+end
+
+@testset "Macro Hygiene" begin
+    # `@i_str` escapes its whole expression, so it has to splice type objects rather than their names.
+    @test isequal(BareCaller.computed(), ClosedClosed(10, 14))
+    @test isequal(BareCaller.infinite(), GreaterEqual(4))
+    @test isequal(BareCaller.nested(), ClosedClosed(2, Greater(4)))
 end

@@ -4,6 +4,11 @@
         "invariantly",
         "isclosed",
         "isdiscrete",
+        "isemptybound",
+        "isnegative",
+        "ispositive",
         "jldoctest",
+        "mispredict",
+        "unclamp",
     ]
 }
